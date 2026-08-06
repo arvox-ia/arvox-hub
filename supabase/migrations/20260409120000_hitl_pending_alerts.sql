@@ -96,13 +96,14 @@ BEGIN
     ORDER BY created_at ASC
   LOOP
     -- Criar activity entry para alertar
+    -- deal_activities não tem coluna created_by_id (o original quebrava em
+    -- runtime quando o alerta disparava); ação de sistema fica sem autor.
     INSERT INTO public.deal_activities (
       organization_id,
       deal_id,
       type,
       description,
-      metadata,
-      created_by_id
+      metadata
     ) VALUES (
       v_pending_advance.organization_id,
       v_pending_advance.deal_id,
@@ -117,8 +118,7 @@ BEGIN
         'hours_pending', FLOOR(EXTRACT(EPOCH FROM (NOW() - v_pending_advance.created_at)) / 3600),
         'expires_at', v_pending_advance.expires_at,
         'alert_type', 'pending_timeout'
-      ),
-      NULL  -- created_by_id = NULL (sistema)
+      )
     );
 
     -- Marcar que alert foi disparado
@@ -149,6 +149,10 @@ COMMENT ON FUNCTION public.trigger_hitl_alerts() IS
 -- 4. Function: expire_old_pending_advances()
 -- ============================================================================
 -- Marca como 'expired' as pending_advances além de 24h
+
+-- O retorno muda de void (migration hitl original) para TABLE — Postgres exige
+-- DROP antes (42P13); sem isso a migration não roda em banco virgem.
+DROP FUNCTION IF EXISTS public.expire_old_pending_advances();
 
 CREATE OR REPLACE FUNCTION public.expire_old_pending_advances()
   RETURNS TABLE(expired_count BIGINT) AS $$
