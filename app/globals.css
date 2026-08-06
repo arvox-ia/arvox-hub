@@ -168,8 +168,8 @@ html, body {
 
 .dark {
   /* Dark Mode - Deep Slate (OKLCH) */
-  --color-bg: oklch(13.5% 0 0);      /* #0D0D0D */
-  --color-surface: oklch(17% 0 0);   /* card um degrau acima */
+  --color-bg: #0D0D0D; /* preto Arvox exato */
+  --color-surface: #161616; /* card um degrau acima */
   --color-muted: oklch(22% 0.015 260);
   --color-border: oklch(26% 0.012 260);
   --color-border-subtle: oklch(22% 0.01 260 / 0.6);
