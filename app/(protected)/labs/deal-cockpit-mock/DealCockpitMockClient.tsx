@@ -22,6 +22,7 @@ import {
   StickyNote,
   X,
 } from 'lucide-react';
+import { APP_NAME } from '@/lib/branding';
 
 type Stage = { id: string; label: string; tone: 'blue' | 'violet' | 'amber' | 'green' | 'slate' };
 
@@ -991,7 +992,7 @@ export default function DealCockpitMockClient() {
                     <Bot className="h-4 w-4 text-cyan-300" />
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">NossoCRM Pilot</div>
+                    <div className="text-sm font-semibold text-slate-100">{APP_NAME} Pilot</div>
                     <div className="text-[11px] text-slate-500">Deal: {mock.deal.title}</div>
                   </div>
                 </div>

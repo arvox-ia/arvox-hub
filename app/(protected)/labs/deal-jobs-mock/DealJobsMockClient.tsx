@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight, MessageSquareText, Phone, Sparkles, Target } from 'lucide-react';
+import { APP_NAME } from '@/lib/branding';
 
 type TimelineItem = {
   id: string;
@@ -220,7 +221,7 @@ export default function DealJobsMockClient() {
                   <Sparkles className="h-4 w-4 text-cyan-300" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold">NossoCRM Copilot</div>
+                  <div className="text-sm font-semibold">{APP_NAME} Copilot</div>
                   <div className="text-xs text-slate-500">1 sugestão por vez</div>
                 </div>
               </div>

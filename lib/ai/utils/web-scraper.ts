@@ -10,9 +10,13 @@
  * Fallback: extração básica via regex para sites que bloqueiam Jina.
  */
 
+import { APP_NAME } from '@/lib/branding';
+
 const JINA_BASE_URL = 'https://r.jina.ai/';
 const FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_CHARS = 4_000;
+// User-Agent product tokens não podem ter espaços (RFC 7230), então removemos os do nome da marca.
+const USER_AGENT = `${APP_NAME.replace(/\s+/g, '')}-Bot/1.0`;
 
 // ── SSRF protection ────────────────────────────────────────────────────────
 
@@ -59,7 +63,7 @@ function extractTitle(html: string) {
 async function fallbackScrape(url: string, maxChars: number) {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    headers: { 'User-Agent': 'NossoCRM-Bot/1.0', 'Accept': 'text/html' },
+    headers: { 'User-Agent': USER_AGENT, 'Accept': 'text/html' },
   });
   if (!res.ok) return null;
   const html = await res.text();

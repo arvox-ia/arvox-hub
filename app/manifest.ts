@@ -1,10 +1,11 @@
 import type { MetadataRoute } from 'next';
+import { APP_NAME, APP_DESCRIPTION } from '@/lib/branding';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'NossoCRM',
-    short_name: 'NossoCRM',
-    description: 'CRM Inteligente para Gestão de Vendas',
+    name: APP_NAME,
+    short_name: 'Arvox Hub',
+    description: APP_DESCRIPTION,
     start_url: '/boards',
     display: 'standalone',
     background_color: '#ffffff',

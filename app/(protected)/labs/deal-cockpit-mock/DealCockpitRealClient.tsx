@@ -31,6 +31,7 @@ import {
   useMoveDealSimple,
 } from '@/lib/query/hooks';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { APP_NAME } from '@/lib/branding';
 
 import { useAIDealAnalysis, deriveHealthFromProbability } from '@/features/inbox/hooks/useAIDealAnalysis';
 import { useDealNotes } from '@/features/inbox/hooks/useDealNotes';
@@ -1975,7 +1976,7 @@ export default function DealCockpitRealClient({ dealId }: { dealId?: string }) {
                     <Sparkles className="h-4 w-4 text-cyan-300" />
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">NossoCRM Pilot</div>
+                    <div className="text-sm font-semibold text-slate-100">{APP_NAME} Pilot</div>
                     <div className="text-[11px] text-slate-500">Deal: {deal.title}</div>
                   </div>
                 </div>

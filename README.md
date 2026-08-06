@@ -1,3 +1,9 @@
+# Arvox Hub
+
+> Fork do [NossoCRM](https://github.com/thaleslaray/nossocrm) (Thales Laray / Escola de Automação e I.A.), com autorização de uso, personalização e revenda concedida no curso. Base da plataforma modular de gestão da Arvox.
+
+---
+
 # NossoCRM
 
 > CRM inteligente com assistente de IA integrado. Gerencie seu pipeline de vendas, contatos e atividades de forma visual e produtiva.

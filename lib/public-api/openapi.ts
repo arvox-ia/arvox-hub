@@ -4,16 +4,18 @@
 // - Keep this file updated together with route implementations.
 // - Prefer stable, integration-friendly shapes (simple objects, consistent errors).
 
+import { APP_NAME } from '@/lib/branding';
+
 export type OpenApiDocument = Record<string, any>;
 
 export function getPublicApiOpenApiDocument(): OpenApiDocument {
   return {
     openapi: '3.1.2',
     info: {
-      title: 'NossoCRM Public API',
+      title: `${APP_NAME} Public API`,
       version: 'v1',
       description:
-        'API pública do NossoCRM para integrações (n8n/Make). Produto em primeiro lugar: copiar → colar → testar.',
+        `API pública do ${APP_NAME} para integrações (n8n/Make). Produto em primeiro lugar: copiar → colar → testar.`,
     },
     servers: [{ url: '/api/public/v1' }],
     tags: [
