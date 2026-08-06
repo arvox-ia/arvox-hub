@@ -7,8 +7,11 @@
 -- RLS applies, but explicit revoke prevents anon access attempts).
 -- =============================================================================
 
-REVOKE ALL ON FUNCTION public.search_messages(UUID, TEXT, INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.search_messages(UUID, TEXT, INT) TO authenticated;
+-- O retorno muda nome de coluna (external_message_id → external_id); Postgres
+-- proíbe CREATE OR REPLACE com tipo de retorno diferente (42P13), então é
+-- preciso dropar antes — sem isso a migration não roda em banco virgem.
+-- REVOKE/GRANT movidos para depois da recriação (permissões se perdem no DROP).
+DROP FUNCTION IF EXISTS public.search_messages(UUID, TEXT, INT);
 
 CREATE OR REPLACE FUNCTION public.search_messages(
   p_conversation_id UUID,
@@ -55,3 +58,6 @@ BEGIN
   LIMIT LEAST(p_limit, 100);
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.search_messages(UUID, TEXT, INT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.search_messages(UUID, TEXT, INT) TO authenticated;
