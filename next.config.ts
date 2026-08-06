@@ -10,6 +10,12 @@ const repoRoot = configDir.includes('/.claude/worktrees/')
   : configDir;
 
 const nextConfig: NextConfig = {
+  // Desliga o indicador de dev tools do Next.js (bolinha "N" no canto inferior
+  // esquerdo em `next dev`). Não é logo do app nem código nosso — é injetado
+  // pelo próprio framework via <nextjs-portal> (shadow DOM) só em desenvolvimento
+  // e nunca aparece em build de produção. Some daqui pra não ser confundido com
+  // a marca antiga durante verificação visual do rebrand.
+  devIndicators: false,
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '*.supabase.co' },

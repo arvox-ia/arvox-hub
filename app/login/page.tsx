@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getErrorMessage } from '@/lib/utils/errorUtils'
 import { Loader2, Mail, Lock, ArrowRight } from 'lucide-react'
+import { APP_NAME } from '@/lib/branding'
 
 /**
  * Componente React `LoginPage`.
@@ -47,7 +48,7 @@ export default function LoginPage() {
             {/* Background Effects */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
                 <div className="absolute -top-[20%] -right-[10%] w-[50%] h-[50%] bg-primary-500/20 rounded-full blur-[120px]" />
-                <div className="absolute top-[40%] -left-[10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[100px]" />
+                <div className="absolute top-[40%] -left-[10%] w-[40%] h-[40%] bg-primary-800/20 rounded-full blur-[100px]" />
             </div>
 
             <div className="max-w-md w-full relative z-10 px-4">
@@ -139,7 +140,7 @@ export default function LoginPage() {
                 </div>
 
                 <p className="mt-8 text-center text-xs text-slate-400 dark:text-slate-500">
-                    &copy; {new Date().getFullYear()} CRM IA. Todos os direitos reservados.
+                    &copy; {new Date().getFullYear()} {APP_NAME}. Todos os direitos reservados.
                 </p>
             </div>
         </div>

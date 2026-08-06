@@ -15,28 +15,28 @@ const config = {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['var(--font-inter)', 'Inter', 'sans-serif'],
-                display: ['Space Grotesk', 'sans-serif'],
+                sans: ['var(--font-poppins)', 'Poppins', 'sans-serif'],
+                display: ['var(--font-poppins)', 'Poppins', 'sans-serif'],
                 serif: ['Cinzel', 'serif'],
             },
             colors: {
                 primary: {
-                    50: '#f0f9ff',
-                    100: '#e0f2fe',
-                    200: '#bae6fd',
-                    300: '#7dd3fc',
-                    400: '#38bdf8',
-                    500: '#0ea5e9',
-                    600: '#0284c7',
-                    700: '#0369a1',
-                    800: '#075985',
-                    900: '#0c4a6e',
+                    50: '#fef2f3',
+                    100: '#fde3e5',
+                    200: '#fbc9ce',
+                    300: '#f79fa7',
+                    400: '#f05467',
+                    500: '#D10419',
+                    600: '#ab0315',
+                    700: '#8c0714',
+                    800: '#740a16',
+                    900: '#630c18',
                 },
                 dark: {
-                    bg: '#020617',
-                    card: '#0f172a',
-                    border: '#1e293b',
-                    hover: '#334155',
+                    bg: '#0D0D0D',
+                    card: '#161616',
+                    border: '#242424',
+                    hover: '#2e2e2e',
                 },
                 // Semantic tokens — bridge CSS vars (globals.css) to Tailwind utilities
                 // Usage: bg-surface, text-muted, bg-success, text-error-text, etc.
