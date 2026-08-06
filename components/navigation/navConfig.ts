@@ -12,9 +12,34 @@ import {
   User,
 } from 'lucide-react';
 
+export type ModuleId = 'crm' | 'finance' | 'projects';
+
+/** Gate opcional de visibilidade de um item de navegação. */
+export interface NavGate {
+  /** Módulo que precisa estar em organization_settings.enabled_modules. */
+  module?: ModuleId;
+  /** Visível apenas para profiles.role === 'admin'. */
+  adminOnly?: boolean;
+}
+
+export interface NavViewer {
+  enabledModules: ModuleId[] | null | undefined;
+  role: string | null | undefined;
+}
+
+/** Itens sem gate sempre passam; com gate, exigem módulo ligado e/ou papel admin. */
+export function filterNav<T extends NavGate>(items: T[], viewer: NavViewer): T[] {
+  const mods = viewer.enabledModules ?? [];
+  return items.filter((item) => {
+    if (item.module && !mods.includes(item.module)) return false;
+    if (item.adminOnly && viewer.role !== 'admin') return false;
+    return true;
+  });
+}
+
 export type PrimaryNavId = 'inbox' | 'messaging' | 'boards' | 'contacts' | 'activities' | 'more';
 
-export interface PrimaryNavItem {
+export interface PrimaryNavItem extends NavGate {
   id: PrimaryNavId;
   label: string;
   /** Route to navigate. For "more", this is omitted because it opens a menu/sheet. */
@@ -33,7 +58,7 @@ export const PRIMARY_NAV: PrimaryNavItem[] = [
 
 export type SecondaryNavId = 'dashboard' | 'reports' | 'settings' | 'profile';
 
-export interface SecondaryNavItem {
+export interface SecondaryNavItem extends NavGate {
   id: SecondaryNavId;
   label: string;
   href: string;
