@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getErrorMessage } from '@/lib/utils/errorUtils'
-import { Loader2, Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react'
+import { Loader2, Mail, Lock, User, ArrowRight, AlertCircle, Eye, EyeOff } from 'lucide-react'
 
 /**
  * Componente React `JoinClient`.
@@ -20,6 +20,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   const token = tokenProp ?? searchParams.get('token')
 
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [validating, setValidating] = useState(true)
   const [inviteData, setInviteData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
@@ -210,15 +211,23 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
                 </div>
                 <input
                   id="join-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   aria-required="true"
                   minLength={6}
-                  className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm"
+                  className="block w-full pl-10 pr-10 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm"
                   placeholder="••••••••"
                   value={formData.password}
                   onChange={e => setFormData({ ...formData, password: e.target.value })}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
             </div>
 
