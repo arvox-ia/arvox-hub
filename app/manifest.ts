@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: APP_DESCRIPTION,
     start_url: '/boards',
     display: 'standalone',
-    background_color: '#ffffff',
-    theme_color: '#0ea5e9',
+    background_color: '#0D0D0D',
+    theme_color: '#D10419',
     icons: [
       // SVG icons keep the repo text-only. If you need iOS splash/touch icons later,
       // add PNGs in a follow-up.

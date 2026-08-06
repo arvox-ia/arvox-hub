@@ -7,27 +7,27 @@
  * ======================================== */
 @theme {
   /* Font Families */
-  --font-sans: 'Inter', var(--font-inter), sans-serif;
-  --font-display: 'Space Grotesk', sans-serif;
+  --font-sans: 'Poppins', var(--font-poppins), sans-serif;
+  --font-display: 'Poppins', var(--font-poppins), sans-serif;
   --font-serif: 'Cinzel', serif;
 
-  /* Primary Colors */
-  --color-primary-50: #f0f9ff;
-  --color-primary-100: #e0f2fe;
-  --color-primary-200: #bae6fd;
-  --color-primary-300: #7dd3fc;
-  --color-primary-400: #38bdf8;
-  --color-primary-500: #0ea5e9;
-  --color-primary-600: #0284c7;
-  --color-primary-700: #0369a1;
-  --color-primary-800: #075985;
-  --color-primary-900: #0c4a6e;
+  /* Primary Colors — vermelho Arvox (#D10419 como 500) */
+  --color-primary-50: #fef2f3;
+  --color-primary-100: #fde3e5;
+  --color-primary-200: #fbc9ce;
+  --color-primary-300: #f79fa7;
+  --color-primary-400: #f05467;
+  --color-primary-500: #D10419;
+  --color-primary-600: #ab0315;
+  --color-primary-700: #8c0714;
+  --color-primary-800: #740a16;
+  --color-primary-900: #630c18;
 
-  /* Dark Theme Colors */
-  --color-dark-bg: #020617;
-  --color-dark-card: #0f172a;
-  --color-dark-border: #1e293b;
-  --color-dark-hover: #334155;
+  /* Dark Theme Colors — neutros Arvox sobre #0D0D0D */
+  --color-dark-bg: #0D0D0D;
+  --color-dark-card: #161616;
+  --color-dark-border: #242424;
+  --color-dark-hover: #2e2e2e;
 
   /* shadcn semantic tokens */
   --color-background: var(--color-bg);
@@ -168,8 +168,8 @@ html, body {
 
 .dark {
   /* Dark Mode - Deep Slate (OKLCH) */
-  --color-bg: oklch(11% 0.025 260);
-  --color-surface: oklch(15% 0.02 260);
+  --color-bg: oklch(13.5% 0 0);      /* #0D0D0D */
+  --color-surface: oklch(17% 0 0);   /* card um degrau acima */
   --color-muted: oklch(22% 0.015 260);
   --color-border: oklch(26% 0.012 260);
   --color-border-subtle: oklch(22% 0.01 260 / 0.6);
