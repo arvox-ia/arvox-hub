@@ -225,7 +225,10 @@ export const queryKeys = {
     /**
      * Org-level + user settings query keys.
      */
-    orgSettings: createQueryKeys('orgSettings'),
+    orgSettings: createExtendedQueryKeys('orgSettings', base => ({
+        /** Enabled modules (organization_settings.enabled_modules) for a given org. */
+        enabledModules: (orgId: string) => [...base.all, 'enabledModules', orgId] as const,
+    })),
 };
 
 /**

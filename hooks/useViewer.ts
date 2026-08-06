@@ -13,6 +13,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { getClient } from '@/lib/supabase/client';
+import { queryKeys } from '@/lib/query/queryKeys';
 import type { ModuleId, NavViewer } from '@/components/navigation/navConfig';
 
 const DEFAULT_MODULES: ModuleId[] = ['crm'];
@@ -22,8 +23,10 @@ export function useViewer(): NavViewer {
   const organizationId = profile?.organization_id ?? null;
 
   const { data: enabledModules } = useQuery({
-    queryKey: ['organizationSettings', 'enabledModules', organizationId],
-    queryFn: async (): Promise<ModuleId[]> => {
+    queryKey: queryKeys.orgSettings.enabledModules(organizationId ?? ''),
+    queryFn: async (): Promise<ModuleId[] | null> => {
+      if (!organizationId) return null;
+
       const supabase = getClient();
       const { data, error } = await supabase
         .from('organization_settings')
@@ -31,7 +34,11 @@ export function useViewer(): NavViewer {
         .eq('organization_id', organizationId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('[useViewer] Error:', error);
+        throw error;
+      }
+
       return (data?.enabled_modules as ModuleId[] | null) ?? DEFAULT_MODULES;
     },
     enabled: !!organizationId,

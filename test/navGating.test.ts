@@ -22,7 +22,7 @@ describe('filterNav', () => {
   })
 
   it('finance ligado + user comum NÃO vê item adminOnly', () => {
-    const out = filterNav(items, { enabledModules: ['crm', 'finance'], role: 'user' })
+    const out = filterNav(items, { enabledModules: ['crm', 'finance'], role: 'vendedor' })
     expect(out.map((i) => i.id)).toEqual(['contacts'])
   })
 
@@ -35,7 +35,7 @@ describe('filterNav', () => {
 describe('canAccessFinance', () => {
   it('exige admin E módulo finance', () => {
     expect(canAccessFinance({ role: 'admin', enabledModules: ['crm', 'finance'] })).toBe(true)
-    expect(canAccessFinance({ role: 'user', enabledModules: ['crm', 'finance'] })).toBe(false)
+    expect(canAccessFinance({ role: 'vendedor', enabledModules: ['crm', 'finance'] })).toBe(false)
     expect(canAccessFinance({ role: 'admin', enabledModules: ['crm'] })).toBe(false)
     expect(canAccessFinance({ role: null, enabledModules: null })).toBe(false)
   })
