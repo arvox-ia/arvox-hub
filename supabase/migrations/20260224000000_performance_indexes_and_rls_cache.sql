@@ -36,14 +36,16 @@ CREATE INDEX IF NOT EXISTS idx_deals_organization_id
 CREATE INDEX IF NOT EXISTS idx_leads_organization_id
   ON public.leads(organization_id);
 
--- ai_decisions.organization_id
-CREATE INDEX IF NOT EXISTS idx_ai_decisions_organization_id
-  ON public.ai_decisions(organization_id);
+-- ai_decisions: a tabela não tem organization_id (o original indexava uma
+-- coluna inexistente e quebrava o replay em banco virgem). A RLS desta tabela
+-- (ai_decisions_user_isolate) filtra por user_id — o índice útil é este.
+CREATE INDEX IF NOT EXISTS idx_ai_decisions_user_id
+  ON public.ai_decisions(user_id);
 
--- messaging_webhook_events.organization_id
--- Used in webhook dedup checks and audit queries.
-CREATE INDEX IF NOT EXISTS idx_messaging_webhook_events_organization_id
-  ON public.messaging_webhook_events(organization_id);
+-- messaging_webhook_events não tem organization_id (é escopada por channel_id,
+-- que já possui índice idx_messaging_webhook_events_channel desde
+-- create_messaging_system). O índice original referenciava coluna inexistente
+-- e quebrava o replay — removido.
 
 
 -- ============================================================
