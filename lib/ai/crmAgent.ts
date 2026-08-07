@@ -212,7 +212,21 @@ REGRAS:
 APRESENTAÇÃO (MUITO IMPORTANTE):
 - NÃO mostre IDs/UUIDs para o usuário final (ex.: "(ID: ...)")
 - NÃO cite nomes internos de tools (ex.: "listStagnantDeals", "markDealAsWon")
-- Sempre prefira: título do deal (nome do card) + contato + valor + estágio (quando fizer sentido)`;
+- Sempre prefira: título do deal (nome do card) + contato + valor + estágio (quando fizer sentido)
+
+FERRAMENTAS FINANCEIRAS (se disponíveis — getFinanceOverview, getCashProjection,
+listOverdueReceivables, prepare*/confirm*): regra de confirmação DIFERENTE das
+ações do CRM acima.
+- Essas ferramentas NÃO têm card de Aprovar/Negar. Toda escrita financeira
+  (lançar despesa, dar baixa em recebível, definir meta) é em DOIS passos:
+  chame primeiro a tool "prepare..." correspondente, mostre o "summary"
+  devolvido por ela ao usuário, em TEXTO, e só chame a tool "confirm..."
+  correspondente depois que o usuário confirmar explicitamente esse resumo.
+- NUNCA chame uma tool "confirm..." sem antes ter mostrado o "summary" do
+  "prepare..." e recebido confirmação explícita do usuário na conversa.
+- Ao chamar a "confirm...", repasse EXATAMENTE os valores (e o
+  confirmationToken) devolvidos pela "prepare..." correspondente — não
+  invente nem arredonde valores.`;
 
 /**
  * Factory function to create a CRM Agent with dynamic context
@@ -221,13 +235,21 @@ APRESENTAÇÃO (MUITO IMPORTANTE):
  * @param userId - Current user ID
  * @param apiKey - Google AI API key from organization_settings
  * @param modelId - Model to use (default from AI_DEFAULT_MODELS)
+ * @param provider - AI provider (only 'google' today)
+ * @param tools - Tools already composed for this request (ver
+ *   `lib/ai/composeChatTools.ts`). Default: só as tools do CRM
+ *   (`createCRMTools`), mesmo comportamento de antes desta injeção existir.
+ *   Passar este parâmetro evita instanciar `createCRMTools` duas vezes
+ *   quando o caller (ex.: `app/api/ai/chat/route.ts`) já precisou do objeto
+ *   de tools do CRM para compor com as tools financeiras.
  */
 export async function createCRMAgent(
     context: CRMCallOptions,
     userId: string,
     apiKey: string,
     modelId: string = AI_DEFAULT_MODELS.google,
-    provider: AIProvider = AI_DEFAULT_PROVIDER
+    provider: AIProvider = AI_DEFAULT_PROVIDER,
+    tools: Record<string, any> = createCRMTools(context, userId)
 ) {
     console.log('[CRMAgent] 🤖 Creating agent with context:', {
         boardId: context.boardId,
@@ -241,9 +263,7 @@ export async function createCRMAgent(
     const google = createGoogleGenerativeAI({ apiKey });
     const model = google(modelId);
 
-    // Create tools with context injected
-    const tools = createCRMTools(context, userId);
-
+    // `tools` já vem pronto (default: só CRM, via createCRMTools — ver assinatura acima).
     console.log('[CRMAgent] 🛠️ Tools created. Checking markDealAsWon config:', {
         needsApproval: (tools.markDealAsWon as any).needsApproval,
         description: tools.markDealAsWon.description

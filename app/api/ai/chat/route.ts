@@ -3,11 +3,16 @@
 
 import { createAgentUIStreamResponse, UIMessage } from 'ai';
 import { createCRMAgent } from '@/lib/ai/crmAgent';
+import { createCRMTools } from '@/lib/ai/tools';
+import { createFinanceTools } from '@/lib/ai/financeTools';
+import { composeChatTools } from '@/lib/ai/composeChatTools';
 import { createClient } from '@/lib/supabase/server';
 import { AI_DEFAULT_MODELS } from '@/lib/ai/defaults';
 import type { CRMCallOptions } from '@/types/ai';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isAIFeatureEnabled } from '@/lib/ai/features/server';
+import type { ViewerAccess } from '@/lib/authz';
+import type { ModuleId } from '@/components/navigation/navConfig';
 
 export const maxDuration = 60;
 
@@ -133,7 +138,7 @@ export async function POST(req: Request) {
     // 3. Get AI settings (org-wide: organization_settings é a fonte de verdade)
     const { data: orgSettings } = await supabase
         .from('organization_settings')
-        .select('ai_enabled, ai_provider, ai_model, ai_google_key')
+        .select('ai_enabled, ai_provider, ai_model, ai_google_key, enabled_modules')
         .eq('organization_id', organizationId)
         .maybeSingle();
 
@@ -212,10 +217,21 @@ export async function POST(req: Request) {
         });
     }
 
-    // 6. Create agent with API key and context
+    // 5b. Gate das tools financeiras: só entram para admin com o módulo 'finance' ligado
+    // na organização (canAccessFinance, via composeChatTools — nunca instancia
+    // createFinanceTools fora desse caso). context.userRole já existe (linha acima) mas,
+    // por si só, NÃO filtra tools — este é o gate explícito (ver 1b-pattern-brief §4).
+    const viewer: ViewerAccess = {
+        role: (profile as any)?.role ?? null,
+        enabledModules: ((orgSettings as any)?.enabled_modules ?? null) as ModuleId[] | null,
+    };
+    const crmTools = createCRMTools(context, user.id);
+    const tools = composeChatTools(crmTools, viewer, () => createFinanceTools({ organizationId }, user.id));
+
+    // 6. Create agent with API key, context and the already-gated tools
     let agent: Awaited<ReturnType<typeof createCRMAgent>>;
     try {
-        agent = await createCRMAgent(context, user.id, apiKey, resolvedModelId, provider);
+        agent = await createCRMAgent(context, user.id, apiKey, resolvedModelId, provider, tools);
     } catch (err: any) {
         const message = String(err?.message || err || 'Erro desconhecido');
         // Ex.: quando o provider é Gemini mas o modelId é OpenAI (ou vice-versa), o SDK retorna mensagens parecidas.
