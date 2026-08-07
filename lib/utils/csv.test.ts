@@ -25,5 +25,21 @@ describe('csv utils', () => {
     const parsed = parseCsv(csv, ',');
     expect([parsed.headers, ...parsed.rows]).toEqual(rows);
   });
+
+  it('neutraliza injeção de fórmula CSV prefixando célula com apóstrofo', () => {
+    const rows = [
+      ['=cmd|\' /C calc\'!A0', '+1+1', '-1+1', '@SUM(A1)', 'texto normal'],
+    ];
+    const csv = stringifyCsv(rows, ',');
+    // Cada célula perigosa ganha um apóstrofo à frente (dentro das aspas, já que o
+    // conteúdo original também contém vírgula/aspas que forçam quoting).
+    expect(csv).toContain("'=cmd|");
+    expect(csv).toContain("'+1+1");
+    expect(csv).toContain("'-1+1");
+    expect(csv).toContain("'@SUM(A1)");
+    // Texto que não começa com =, +, -, @ não é alterado.
+    expect(csv).toContain('texto normal');
+    expect(csv).not.toContain("'texto normal");
+  });
 });
 

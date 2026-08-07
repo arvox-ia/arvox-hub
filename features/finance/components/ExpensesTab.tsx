@@ -25,6 +25,8 @@ interface ExpensesTabProps {
     | 'expenseCategoryTotals'
     | 'expenseMonthTotal'
     | 'fixedExpenseRules'
+    | 'expensesById'
+    | 'materializationError'
     | 'toggleExpenseActive'
     | 'toggleEntryPaid'
     | 'today'
@@ -64,6 +66,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ controller }) => {
     expenseCategoryTotals,
     expenseMonthTotal,
     fixedExpenseRules,
+    expensesById,
+    materializationError,
     toggleExpenseActive,
     toggleEntryPaid,
     expenseFormState,
@@ -111,6 +115,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ controller }) => {
         </button>
       </div>
 
+      {materializationError && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/10 text-sm text-red-700 dark:text-red-400">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>
+            Não foi possível lançar automaticamente todas as despesas fixas deste mês. O total abaixo pode estar
+            incompleto — mude de mês e volte para tentar de novo, ou recarregue a página.
+          </span>
+        </div>
+      )}
+
       <div className="p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card space-y-3">
         <div className="flex items-baseline justify-between">
           <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Total do mês</span>
@@ -140,7 +154,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ controller }) => {
         <ul className="space-y-2">
           {expenseEntryRows.map(row => {
             const isPaid = row.status === 'PAID';
-            const relatedExpense = fixedExpenseRules.find(e => e.id === row.expenseId);
+            // `expensesById` cobre TODO o catálogo (FIXED + ONE_TIME) — `fixedExpenseRules`
+            // é filtrado só a FIXED, então usá-lo aqui deixava despesas pontuais sem botão de
+            // editar (achado da revisão: bug crítico, pontual nunca podia ser corrigida).
+            const relatedExpense = expensesById.get(row.expenseId);
             return (
               <li
                 key={row.entryId}

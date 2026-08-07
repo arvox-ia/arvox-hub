@@ -55,6 +55,18 @@ const GoalMonthRow: React.FC<GoalMonthRowProps> = ({ month, targetValue, onCommi
           onBlur={() => {
             if (value !== targetValue) onCommit(month, value);
           }}
+          onKeyDown={e => {
+            // Achado da revisão: sem isto, um valor digitado e "confirmado" com Enter
+            // (padrão de teclado em qualquer form) só era salvo se o blur nativo do
+            // browser acontecesse depois — dar Enter e navegar de outro jeito (ex.:
+            // trocar de aba) perdia o valor digitado. Só disparamos blur() aqui —
+            // o commit em si continua vivendo só em `onBlur`, pra nunca chamar
+            // `onCommit` duas vezes pro mesmo valor (blur() dispara onBlur de novo).
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           className="w-32 bg-white dark:bg-black/30 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-sm text-right text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 transition-all"
         />
       </div>

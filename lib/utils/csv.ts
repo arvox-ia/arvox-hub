@@ -115,8 +115,23 @@ export function parseCsv(input: string, delimiter: CsvDelimiter): { headers: str
   return { headers, rows: dataRows };
 }
 
+/** Caracteres que o Excel/Sheets interpretam como início de fórmula quando abrem um CSV. */
+const FORMULA_INJECTION_PREFIXES = ['=', '+', '-', '@'];
+
+/**
+ * Neutraliza injeção de fórmula CSV (achado da revisão — OWASP "CSV Injection"):
+ * uma célula de texto vinda de input do usuário (descrição, categoria, nome de
+ * contato etc.) que comece com `=`, `+`, `-` ou `@` é interpretada como fórmula
+ * ao abrir o arquivo no Excel/Sheets, podendo disparar `=cmd|...` ou puxar dados
+ * externos. Prefixar com um apóstrofo força o programa a tratar o conteúdo como
+ * texto literal, sem alterar o valor visível.
+ */
+function neutralizeFormulaInjection(value: string): string {
+  return FORMULA_INJECTION_PREFIXES.includes(value.charAt(0)) ? `'${value}` : value;
+}
+
 function escapeCsvCell(value: string, delimiter: CsvDelimiter): string {
-  const v = value ?? '';
+  const v = neutralizeFormulaInjection(value ?? '');
   const mustQuote = v.includes('"') || v.includes('\n') || v.includes('\r') || v.includes(delimiter);
   if (!mustQuote) return v;
   return `"${v.replace(/"/g, '""')}"`;

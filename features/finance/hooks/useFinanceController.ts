@@ -453,8 +453,33 @@ export function useFinanceController() {
    * não vira um loop de retry infinito batendo no banco a cada re-render.
    * Idempotência de verdade (contra corrida entre abas/StrictMode) é
    * responsabilidade de `createExpenseEntries` no data layer, não daqui.
+   *
+   * CRÍTICO (achado da revisão): a chave só é gravada em `materializationAttempted`
+   * APÓS sucesso da mutation — nunca antes de disparar. Gravar antes (como na
+   * versão anterior) fazia uma falha transitória (rede/RLS) bloquear o retry
+   * PARA SEMPRE naquele conjunto de regras+mês, com o total do mês
+   * silenciosamente baixo e nenhum sinal na tela. Em erro, a chave é removida
+   * do set (permite retry na próxima vez que o efeito rodar) e o estado
+   * `materializationError` liga o aviso inline em `ExpensesTab` — silêncio é
+   * a parte inaceitável aqui, não a falha em si.
+   *
+   * PEGADINHA DE SOFT-DELETE (documentado para quem for adicionar exclusão):
+   * "já materializado" é derivado de `materializedExpenseIds`, que vem de
+   * `expenseEntries` — e essa lista já está filtrada por `deleted_at IS NULL`
+   * (ver `financeService.listExpenseEntries`). Se uma futura feature de
+   * "remover lançamento" fizer soft-delete de uma entry, ela AUTOMATICAMENTE
+   * some de `materializedExpenseIds`, e este efeito vai interpretar a regra
+   * como "ainda não materializada neste mês" e recriar o lançamento no
+   * próximo render. Quem implementar essa exclusão precisa de uma tombstone
+   * check (ex.: um Set separado de `expenseId` com entry soft-deletada no
+   * período, verificado ANTES de recriar) para não reviver algo que o
+   * usuário removeu de propósito.
    */
   const materializationAttempted = useRef<Set<string>>(new Set());
+  /** Chaves já notificadas por toast (evita reabrir o mesmo toast a cada retry automático do mesmo conjunto de regras). */
+  const materializationToastedKeys = useRef<Set<string>>(new Set());
+  /** `true` quando a última tentativa de materialização deste mês falhou — liga o aviso inline em `ExpensesTab`. */
+  const [materializationError, setMaterializationError] = useState(false);
 
   useEffect(() => {
     if (expensesLoading || expenseEntriesLoading) return;
@@ -462,7 +487,10 @@ export function useFinanceController() {
     const activeFixedRules = expenses.filter(e => e.kind === 'FIXED' && e.active);
     const materializedExpenseIds = new Set(expenseEntries.map(e => e.expenseId));
     const missing = activeFixedRules.filter(e => !materializedExpenseIds.has(e.id));
-    if (missing.length === 0) return;
+    if (missing.length === 0) {
+      setMaterializationError(false);
+      return;
+    }
 
     const attemptKey = `${expensesPeriod}:${missing.map(e => e.id).sort().join(',')}`;
     if (materializationAttempted.current.has(attemptKey)) return;
@@ -476,7 +504,31 @@ export function useFinanceController() {
       return { expenseId: entry.expenseId, dueDate: entry.dueDate, amount: entry.amount };
     });
 
-    createExpenseEntriesMutation.mutate({ entries: toCreate, period: expensesPeriod });
+    createExpenseEntriesMutation.mutate(
+      { entries: toCreate, period: expensesPeriod },
+      {
+        onSuccess: () => {
+          materializationToastedKeys.current.delete(attemptKey);
+          setMaterializationError(false);
+        },
+        onError: error => {
+          // Remove a chave para que o próximo disparo do efeito (nova visita ao mês,
+          // ou o refetch que `onSettled` da mutation já dispara mesmo em erro) tente de novo
+          // — em vez de bloquear o retry para sempre neste conjunto de regras+mês.
+          materializationAttempted.current.delete(attemptKey);
+          console.error('[finance] falha ao materializar despesas fixas do mês', {
+            period: expensesPeriod,
+            expenseIds: missing.map(e => e.id),
+            error,
+          });
+          setMaterializationError(true);
+          if (!materializationToastedKeys.current.has(attemptKey)) {
+            materializationToastedKeys.current.add(attemptKey);
+            addToast('Não foi possível lançar as despesas fixas deste mês. Tente novamente.', 'error');
+          }
+        },
+      }
+    );
     // Deps deliberadamente sem `createExpenseEntriesMutation`: é o objeto de retorno de
     // `useMutation`, não referencialmente estável entre renders — incluir causaria loop.
   }, [expensesPeriod, expenses, expenseEntries, expensesLoading, expenseEntriesLoading]);
@@ -486,7 +538,15 @@ export function useFinanceController() {
   const openCreateExpense = () => setExpenseFormState({ mode: 'create' });
   const openEditExpense = (expense: FinanceExpense) => setExpenseFormState({ mode: 'edit', expense });
   const closeExpenseForm = () => setExpenseFormState(null);
-  const isSavingExpense = createExpenseMutation.isPending || updateExpenseMutation.isPending;
+  // Inclui as mutations de LANÇAMENTO (não só as de catálogo) — o submit de uma despesa
+  // pontual dispara `createExpenseEntriesMutation`/`updateEntryForExpenseMutation` em
+  // sequência (ver `submitExpenseForm`); sem isso o botão reabilitava entre o `await` da
+  // primeira mutation e o da segunda, permitindo duplo clique/duplo submit.
+  const isSavingExpense =
+    createExpenseMutation.isPending ||
+    updateExpenseMutation.isPending ||
+    createExpenseEntriesMutation.isPending ||
+    updateEntryForExpenseMutation.isPending;
 
   /**
    * Submit do form de despesa. Pontual (`ONE_TIME`) ganha o único lançamento
@@ -911,6 +971,8 @@ export function useFinanceController() {
     expenseCategoryTotals,
     expenseMonthTotal,
     fixedExpenseRules,
+    expensesById,
+    materializationError,
     toggleExpenseActive,
     toggleEntryPaid,
 
