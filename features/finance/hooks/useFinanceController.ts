@@ -35,6 +35,7 @@ import {
   useAllReceivables,
   useAllExpenseEntries,
   useOpenDealsForProjection,
+  useWonDealsForImport,
 } from '@/lib/query/hooks/useFinanceQuery';
 import { generateReceivables } from '../core/receivables';
 import { generateFixedExpenseEntries, sumByCategory } from '../core/expenses';
@@ -49,6 +50,7 @@ import { buildContractsCsvRows, buildExpensesCsvRows, buildReceivablesCsvRows } 
 import { buildProjection } from '../core/projection';
 import { addMonthsToKey, weightDeals } from '../core/pipeline';
 import { mapOpenDealForProjection } from '../core/dealMapping';
+import { parseDealFinanceFields } from '../core/dealFields';
 import {
   computeGoalProgressPct,
   computeMonthKpis,
@@ -66,6 +68,7 @@ import {
   type NewFinanceExpenseEntryInput,
   type NewFinanceExpenseInput,
   type NewReceivableInput,
+  type WonDealForImport,
 } from '@/lib/supabase/finance';
 import { stringifyCsv, withUtf8Bom } from '@/lib/utils/csv';
 import { downloadTextFile } from '@/lib/utils/download';
@@ -106,7 +109,7 @@ export interface ContractFormValues {
   billingDay: number;
 }
 
-/** Estado do modal de contrato: fechado, ou aberto em um dos 3 modos. */
+/** Estado do modal de contrato: fechado, ou aberto em um dos 4 modos. */
 export type ContractFormState =
   | { mode: 'create' }
   | { mode: 'edit'; contract: FinanceContract }
@@ -121,7 +124,25 @@ export type ContractFormState =
        */
       previousLastDueDate: string | null;
       initialValues: ContractFormValues;
+    }
+  | {
+      /**
+       * "Importar de deal ganho" (Task 10) — mesmo shape de `renew`
+       * (prefill + submit passa pelo caminho de criação), mas sem guard de
+       * colisão (não há contrato anterior) e com `deal.id` que
+       * `submitCreateContract` grava em `finance_contracts.deal_id` no
+       * submit, pra o deal nunca poder ser importado duas vezes.
+       */
+      mode: 'import';
+      deal: WonDealForImport;
+      initialValues: ContractFormValues;
     };
+
+/** Uma linha da lista de deals ganhos ainda não importados como contrato (Task 10). */
+export interface ImportableDealRow {
+  deal: WonDealForImport;
+  contactName: string | null;
+}
 
 /** Uma linha da lista de contratos, com dados já derivados para a UI. */
 export interface ContractRow {
@@ -187,6 +208,7 @@ export function useFinanceController() {
   const { data: allReceivables = [], isLoading: allReceivablesLoading } = useAllReceivables();
   const { data: allExpenseEntries = [], isLoading: allExpenseEntriesLoading } = useAllExpenseEntries();
   const { data: openDeals = [], isLoading: openDealsLoading } = useOpenDealsForProjection();
+  const { data: wonDeals = [], isLoading: wonDealsLoading } = useWonDealsForImport();
 
   const contactsById = useMemo(() => new Map(contacts.map(c => [c.id, c])), [contacts]);
   const horizonMonths = settings?.projectionMonths ?? DEFAULT_HORIZON_MONTHS;
@@ -251,6 +273,62 @@ export function useFinanceController() {
 
   const closeContractForm = () => setContractFormState(null);
 
+  // ---------- "Importar de deal ganho" (Task 10) ----------
+  const [isImportDealPickerOpen, setIsImportDealPickerOpen] = useState(false);
+  const openImportDealPicker = () => setIsImportDealPickerOpen(true);
+  const closeImportDealPicker = () => setIsImportDealPickerOpen(false);
+
+  /** IDs de deal já vinculados a algum contrato (qualquer status) — deriva de `contracts`, já em cache, sem query extra. */
+  const importedDealIds = useMemo(
+    () => new Set(contracts.map(c => c.dealId).filter((id): id is string => !!id)),
+    [contracts]
+  );
+
+  /** Deals ganhos que ainda não viraram contrato — lista mostrada no picker de importação. */
+  const importableDealRows: ImportableDealRow[] = useMemo(
+    () =>
+      wonDeals
+        .filter(deal => !importedDealIds.has(deal.id))
+        .map(deal => ({ deal, contactName: deal.contactId ? contactsById.get(deal.contactId)?.name ?? null : null })),
+    [wonDeals, importedDealIds, contactsById]
+  );
+
+  /**
+   * Abre o form de contrato pré-preenchido a partir de um deal ganho:
+   * contato e setup vêm direto do deal (`value` = setup, sem parcelamento
+   * — o usuário reparcela editando o form antes de salvar), mensalidade e
+   * duração vêm de `parseDealFinanceFields` (custom_fields do deal, ver
+   * `../core/dealFields.ts`).
+   *
+   * Início do contrato = data em que o deal foi FECHADO (`closedAt`), não
+   * `expectedClose` (esse era só uma estimativa pré-fechamento, já obsoleta
+   * agora que o deal ganhou) nem `today` por padrão — o contrato reflete
+   * quando o cliente foi ganho de verdade, não quando alguém lembrou de
+   * importar pro financeiro. Sem `closedAt` (deal legado sem a data
+   * gravada), cai em `today`. O campo continua editável no form antes de
+   * salvar.
+   */
+  const openImportContract = (deal: WonDealForImport) => {
+    const { monthlyValue, durationMonths } = parseDealFinanceFields(deal.customFields);
+    const startDate = deal.closedAt ? deal.closedAt.slice(0, 10) : today;
+
+    setContractFormState({
+      mode: 'import',
+      deal,
+      initialValues: {
+        contactId: deal.contactId ?? '',
+        description: deal.title,
+        setupValue: deal.value,
+        setupInstallments: 1,
+        monthlyValue,
+        startDate,
+        durationMonths,
+        billingDay: 5, // mesmo default do modo 'create' (ContractFormModal).
+      },
+    });
+    setIsImportDealPickerOpen(false);
+  };
+
   /** Preview dos recebíveis que seriam gerados — chamado pelo form a cada mudança de campo, antes de salvar. */
   const previewReceivables = (values: ContractFormValues): ReceivableEntry[] => {
     const input: ContractInput = {
@@ -266,7 +344,7 @@ export function useFinanceController() {
 
   const isSavingContract = createContractMutation.isPending || updateContractMutation.isPending;
 
-  /** Submit do modal em modo 'create' ou 'renew' — gera recebíveis via core e cria o contrato. */
+  /** Submit do modal em modo 'create', 'renew' ou 'import' — gera recebíveis via core e cria o contrato. */
   const submitCreateContract = async (values: ContractFormValues) => {
     const state = contractFormState;
     if (!state || state.mode === 'edit') return;
@@ -287,6 +365,10 @@ export function useFinanceController() {
 
     const contractInput: NewFinanceContractInput = {
       contactId: values.contactId,
+      // Só o modo 'import' vincula um deal — grava `deal_id` no submit pra
+      // esse deal nunca poder ser importado de novo (ver `importableDealRows`,
+      // que exclui qualquer deal já presente em `contracts.dealId`).
+      dealId: state.mode === 'import' ? state.deal.id : null,
       description: values.description,
       setupValue: values.setupValue,
       setupInstallments: values.setupInstallments,
@@ -313,7 +395,11 @@ export function useFinanceController() {
       }
 
       addToast(
-        state.mode === 'renew' ? 'Contrato renovado com sucesso' : 'Contrato criado com sucesso',
+        state.mode === 'renew'
+          ? 'Contrato renovado com sucesso'
+          : state.mode === 'import'
+            ? 'Contrato importado do deal com sucesso'
+            : 'Contrato criado com sucesso',
         'success'
       );
       closeContractForm();
@@ -948,6 +1034,14 @@ export function useFinanceController() {
     submitCreateContract,
     submitEditContract,
     isSavingContract,
+
+    // ---------- Importar de deal ganho ----------
+    importableDealRows,
+    wonDealsLoading,
+    isImportDealPickerOpen,
+    openImportDealPicker,
+    closeImportDealPicker,
+    openImportContract,
 
     endContractTarget,
     requestEndContract,

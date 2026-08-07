@@ -175,6 +175,21 @@ export interface DbOpenDealForProjection {
   closed_at: string | null;
 }
 
+/**
+ * Linha crua de um deal GANHO (`is_won = true`), candidato ao fluxo
+ * "importar de deal ganho" da aba Contratos (Task 10). `custom_fields` é
+ * exposto sem parsing pelo mesmo motivo de `DbOpenDealForProjection` — quem
+ * sabe o shape é `features/finance/core/dealFields.ts#parseDealFinanceFields`.
+ */
+export interface DbWonDealForImport {
+  id: string;
+  title: string;
+  value: number;
+  contact_id: string | null;
+  custom_fields: Record<string, unknown>;
+  closed_at: string | null;
+}
+
 // ============================================
 // DOMAIN TYPES (camelCase)
 // ============================================
@@ -271,6 +286,22 @@ export interface OpenDealForProjection {
   id: string;
   value: number;
   probability: number;
+  customFields: Record<string, unknown>;
+  closedAt: string | null;
+}
+
+/**
+ * Deal ganho (`is_won = true`, não deletado) exposto para o fluxo
+ * "importar de deal ganho" da aba Contratos (Task 10). O controller cruza
+ * esta lista com `contracts` (já carregado por `useContracts`) para
+ * descobrir quais deals ainda NÃO viraram contrato — nenhum filtro
+ * `NOT IN (...)` aqui, pra não precisar de um segundo round-trip/RPC.
+ */
+export interface WonDealForImport {
+  id: string;
+  title: string;
+  value: number;
+  contactId: string | null;
   customFields: Record<string, unknown>;
   closedAt: string | null;
 }
@@ -411,6 +442,15 @@ const transformOpenDeal = (db: DbOpenDealForProjection): OpenDealForProjection =
   id: db.id,
   value: db.value ?? 0,
   probability: db.probability ?? 0,
+  customFields: db.custom_fields || {},
+  closedAt: db.closed_at,
+});
+
+const transformWonDeal = (db: DbWonDealForImport): WonDealForImport => ({
+  id: db.id,
+  title: db.title,
+  value: db.value ?? 0,
+  contactId: db.contact_id,
   customFields: db.custom_fields || {},
   closedAt: db.closed_at,
 });
@@ -1132,6 +1172,28 @@ export const financeService = {
 
       if (error) return { data: null, error };
       return { data: (data || []).map(d => transformOpenDeal(d as DbOpenDealForProjection)), error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /**
+   * Lista deals GANHOS (não deletados) candidatos ao fluxo "importar de deal
+   * ganho" (Task 10). Não filtra aqui os que já viraram contrato — o
+   * controller cruza com `contracts.dealId` (já em cache via `useContracts`,
+   * sem query extra) para descobrir quais ainda faltam importar.
+   */
+  async listWonDealsForImport(): Promise<{ data: WonDealForImport[] | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+      const { data, error } = await supabase
+        .from('deals')
+        .select('id, title, value, contact_id, custom_fields, closed_at')
+        .is('deleted_at', null)
+        .eq('is_won', true);
+
+      if (error) return { data: null, error };
+      return { data: (data || []).map(d => transformWonDeal(d as DbWonDealForImport)), error: null };
     } catch (e) {
       return { data: null, error: e as Error };
     }

@@ -28,11 +28,22 @@ describe('mapOpenDealForProjection — defaults quando custom_fields ausente', (
   })
 })
 
-describe('mapOpenDealForProjection — campos válidos presentes', () => {
-  it('lê monthlyValue/durationMonths/expectedClose quando bem formados', () => {
+describe('mapOpenDealForProjection — campos válidos presentes (convenção real, ver dealFields.ts)', () => {
+  it('lê valorMensal/duracaoMeses/previsaoFechamento quando bem formados (valores number)', () => {
     const out = mapOpenDealForProjection(
       makeDeal({
-        customFields: { monthlyValue: 800, durationMonths: 12, expectedClose: '2026-05-10' },
+        customFields: { valorMensal: 800, duracaoMeses: 12, previsaoFechamento: '2026-05-10' },
+      })
+    )
+    expect(out.monthlyValue).toBe(800)
+    expect(out.durationMonths).toBe(12)
+    expect(out.expectedClose).toBe('2026-05-10')
+  })
+
+  it('lê os mesmos campos quando vêm como string (formato real do <input> da UI de deals)', () => {
+    const out = mapOpenDealForProjection(
+      makeDeal({
+        customFields: { valorMensal: '800', duracaoMeses: '12', previsaoFechamento: '2026-05-10' },
       })
     )
     expect(out.monthlyValue).toBe(800)
@@ -41,25 +52,30 @@ describe('mapOpenDealForProjection — campos válidos presentes', () => {
   })
 })
 
-describe('mapOpenDealForProjection — campos com tipo inesperado', () => {
-  it('monthlyValue string, durationMonths negativo, expectedClose não-ISO → caem nos defaults', () => {
+describe('mapOpenDealForProjection — campos com tipo/valor inesperado', () => {
+  it('duracaoMeses negativo e previsaoFechamento não-ISO caem nos defaults', () => {
     const out = mapOpenDealForProjection(
       makeDeal({
-        customFields: { monthlyValue: '800', durationMonths: -3, expectedClose: '10/05/2026' },
+        customFields: { valorMensal: '800', duracaoMeses: -3, previsaoFechamento: '10/05/2026' },
       })
     )
-    expect(out.monthlyValue).toBe(0)
+    expect(out.monthlyValue).toBe(800)
     expect(out.durationMonths).toBe(6)
     expect(out.expectedClose).toBeNull()
   })
 
-  it('durationMonths 0 (não positivo) cai no default', () => {
-    const out = mapOpenDealForProjection(makeDeal({ customFields: { durationMonths: 0 } }))
+  it('duracaoMeses 0 (não positivo) cai no default', () => {
+    const out = mapOpenDealForProjection(makeDeal({ customFields: { duracaoMeses: 0 } }))
     expect(out.durationMonths).toBe(6)
   })
 
-  it('monthlyValue NaN/Infinity cai no default', () => {
-    const out = mapOpenDealForProjection(makeDeal({ customFields: { monthlyValue: NaN } }))
-    expect(out.monthlyValue).toBe(0)
+  it('valorMensal NaN/Infinity/negativo cai no default', () => {
+    expect(mapOpenDealForProjection(makeDeal({ customFields: { valorMensal: NaN } })).monthlyValue).toBe(0)
+    expect(mapOpenDealForProjection(makeDeal({ customFields: { valorMensal: Infinity } })).monthlyValue).toBe(0)
+    expect(mapOpenDealForProjection(makeDeal({ customFields: { valorMensal: -50 } })).monthlyValue).toBe(0)
+  })
+
+  it('valorMensal não-numérico cai no default', () => {
+    expect(mapOpenDealForProjection(makeDeal({ customFields: { valorMensal: 'abc' } })).monthlyValue).toBe(0)
   })
 })

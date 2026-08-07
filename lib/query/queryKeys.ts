@@ -247,6 +247,8 @@ export const queryKeys = {
         entries: (period: string) => [...base.all, 'entries', period] as const,
         goals: () => [...base.all, 'goals'] as const,
         openDeals: () => [...base.all, 'openDeals'] as const,
+        /** Deals ganhos candidatos ao fluxo "importar de deal ganho" (Task 10). */
+        wonDeals: () => [...base.all, 'wonDeals'] as const,
         /** Todos os recebíveis não deletados, sem filtro de período — usado pelo Dashboard (Task 9) para alimentar `buildProjection` e a UpcomingList. */
         allReceivables: () => [...base.all, 'allReceivables'] as const,
         /** Todos os lançamentos de despesa não deletados, sem filtro de período — mesmo racional de `allReceivables`. */

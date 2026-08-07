@@ -26,6 +26,7 @@ import type {
   NewFinanceGoalInput,
   NewReceivableInput,
   OpenDealForProjection,
+  WonDealForImport,
 } from '@/lib/supabase/finance';
 
 // ============ QUERY HOOKS ============
@@ -190,6 +191,22 @@ export const useOpenDealsForProjection = (options?: { enabled?: boolean }) => {
     queryKey: queryKeys.finance.openDeals(),
     queryFn: async () => {
       const { data, error } = await financeService.listOpenDealsForProjection();
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !authLoading && !!user && externalEnabled,
+  });
+};
+
+/** Deals ganhos (não deletados) candidatos ao fluxo "importar de deal ganho" (Task 10). */
+export const useWonDealsForImport = (options?: { enabled?: boolean }) => {
+  const { user, loading: authLoading } = useAuth();
+  const externalEnabled = options?.enabled ?? true;
+
+  return useQuery<WonDealForImport[]>({
+    queryKey: queryKeys.finance.wonDeals(),
+    queryFn: async () => {
+      const { data, error } = await financeService.listWonDealsForImport();
       if (error) throw error;
       return data || [];
     },

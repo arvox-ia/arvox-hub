@@ -45,7 +45,7 @@ function initialValuesFor(state: ContractFormState, today: string): ContractForm
       billingDay: c.billingDay,
     };
   }
-  if (state.mode === 'renew') {
+  if (state.mode === 'renew' || state.mode === 'import') {
     return state.initialValues;
   }
   return {
@@ -90,7 +90,13 @@ export const ContractFormModal: React.FC<ContractFormModalProps> = ({
   const selectedContact = contacts.find(c => c.id === values.contactId) ?? null;
 
   const title =
-    state.mode === 'edit' ? 'Editar contrato' : state.mode === 'renew' ? 'Renovar contrato' : 'Novo contrato';
+    state.mode === 'edit'
+      ? 'Editar contrato'
+      : state.mode === 'renew'
+        ? 'Renovar contrato'
+        : state.mode === 'import'
+          ? 'Importar contrato do deal'
+          : 'Novo contrato';
 
   const durationSelectOptions =
     durationOption.startsWith('CUSTOM_') && values.durationMonths !== null
@@ -298,7 +304,13 @@ export const ContractFormModal: React.FC<ContractFormModalProps> = ({
         )}
 
         <SubmitButton isLoading={isSaving} loadingText="Salvando..." disabled={hasCollision}>
-          {state.mode === 'edit' ? 'Salvar alterações' : state.mode === 'renew' ? 'Criar renovação' : 'Criar contrato'}
+          {state.mode === 'edit'
+            ? 'Salvar alterações'
+            : state.mode === 'renew'
+              ? 'Criar renovação'
+              : state.mode === 'import'
+                ? 'Importar contrato'
+                : 'Criar contrato'}
         </SubmitButton>
       </ModalForm>
     </Modal>

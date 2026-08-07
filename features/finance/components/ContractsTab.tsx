@@ -3,7 +3,7 @@
 import React from 'react';
 import { parseISO, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { FileText, Plus, Receipt, Pencil, RefreshCw, XCircle, Clock } from 'lucide-react';
+import { FileText, Plus, Receipt, Pencil, RefreshCw, XCircle, Clock, Handshake } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -11,6 +11,7 @@ import { formatBRL } from '@/lib/utils/currency';
 import { cn } from '@/lib/utils/cn';
 import { ContractFormModal } from './ContractFormModal';
 import { ContractReceivablesSheet } from './ContractReceivablesSheet';
+import { ImportDealModal } from './ImportDealModal';
 import { daysUntil } from '../core/contractStatus';
 import type { useFinanceController } from '../hooks/useFinanceController';
 
@@ -32,6 +33,12 @@ interface ContractsTabProps {
     | 'submitCreateContract'
     | 'submitEditContract'
     | 'isSavingContract'
+    | 'importableDealRows'
+    | 'wonDealsLoading'
+    | 'isImportDealPickerOpen'
+    | 'openImportDealPicker'
+    | 'closeImportDealPicker'
+    | 'openImportContract'
     | 'endContractTarget'
     | 'requestEndContract'
     | 'cancelEndContract'
@@ -70,6 +77,12 @@ export const ContractsTab: React.FC<ContractsTabProps> = ({ controller }) => {
     submitCreateContract,
     submitEditContract,
     isSavingContract,
+    importableDealRows,
+    wonDealsLoading,
+    isImportDealPickerOpen,
+    openImportDealPicker,
+    closeImportDealPicker,
+    openImportContract,
     endContractTarget,
     requestEndContract,
     cancelEndContract,
@@ -90,7 +103,14 @@ export const ContractsTab: React.FC<ContractsTabProps> = ({ controller }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={openImportDealPicker}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+        >
+          <Handshake size={16} /> Importar de deal ganho
+        </button>
         <button
           type="button"
           onClick={openCreateContract}
@@ -241,6 +261,14 @@ export const ContractsTab: React.FC<ContractsTabProps> = ({ controller }) => {
         isLoading={receivablesLoading}
         onTogglePaid={toggleReceivablePaid}
         onClose={closeReceivablesSheet}
+      />
+
+      <ImportDealModal
+        isOpen={isImportDealPickerOpen}
+        rows={importableDealRows}
+        isLoading={wonDealsLoading}
+        onSelect={row => openImportContract(row.deal)}
+        onClose={closeImportDealPicker}
       />
     </div>
   );
