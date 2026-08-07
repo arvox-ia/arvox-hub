@@ -121,6 +121,7 @@ const transformContact = (db: DbContact): Contact => ({
   phone: normalizePhoneE164(db.phone),
   role: db.role || '',
   clientCompanyId: db.client_company_id || undefined,
+  companyName: db.company_name || undefined,
   companyId: db.client_company_id || '', // @deprecated - backwards compatibility
   avatar: db.avatar || '',
   notes: db.notes || '',

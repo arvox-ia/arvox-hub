@@ -254,7 +254,11 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                                 {(contact.name || '?').charAt(0)}
                                             </button>
                                             <div>
-                                                <span className="font-semibold text-slate-900 dark:text-white block">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openEditModal(contact)}
+                                                    className="font-semibold text-slate-900 dark:text-white block text-left hover:text-primary-600 dark:hover:text-primary-400 transition-colors focus-visible-ring rounded"
+                                                >
                                                     {contact.name}
                                                     {duplicateContactIds?.has(contact.id) && (
                                                         <span className="inline-flex items-center gap-1 ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-full align-middle">
@@ -262,7 +266,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                                             Duplicado
                                                         </span>
                                                     )}
-                                                </span>
+                                                </button>
                                             </div>
                                         </div>
                                     </td>
@@ -274,7 +278,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                             <span className="text-slate-900 dark:text-white font-medium block">{contact.role || 'Cargo não inf.'}</span>
                                             <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                                                 <Building2 size={10} />
-                                                <span>{getCompanyName(contact.clientCompanyId)}</span>
+                                                <span>{contact.clientCompanyId ? getCompanyName(contact.clientCompanyId) : (contact.companyName || 'Empresa não vinculada')}</span>
                                             </div>
                                         </div>
                                     </td>
@@ -331,7 +335,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                        <div className="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                                             <button
                                                 onClick={() => openEditModal(contact)}
                                                 className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
@@ -470,7 +474,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                        <div className="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                                             <button
                                                 onClick={() => openEditCompanyModal?.(company)}
                                                 className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"

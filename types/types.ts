@@ -153,6 +153,7 @@ export interface Contact {
   id: string;
   organizationId?: OrganizationId; // Tenant FK (for RLS) - optional during migration
   clientCompanyId?: ClientCompanyId; // CRM company this contact belongs to
+  companyName?: string; // Nome da empresa em texto livre (quando não há vínculo com Company)
   name: string;
   role?: string;
   email: string;

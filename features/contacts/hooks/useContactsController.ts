@@ -161,6 +161,7 @@ export const useContactsController = () => {
     phone: '',
     role: '',
     companyName: '',
+    notes: '',
   });
   const [isSubmittingContact, setIsSubmittingContact] = useState(false);
 
@@ -177,7 +178,7 @@ export const useContactsController = () => {
       return;
     }
     setEditingContact(null);
-    setFormData({ name: '', email: '', phone: '', role: '', companyName: '' });
+    setFormData({ name: '', email: '', phone: '', role: '', companyName: '', notes: '' });
     setIsModalOpen(true);
   };
 
@@ -190,6 +191,7 @@ export const useContactsController = () => {
       phone: contact.phone,
       role: contact.role || '',
       companyName: company?.name || '',
+      notes: contact.notes || '',
     });
     setIsModalOpen(true);
   };
@@ -420,6 +422,7 @@ export const useContactsController = () => {
             phone: normalizedPhone,
             role: formData.role,
             companyId: companyId,
+            notes: formData.notes,
           },
         },
         {
@@ -441,6 +444,7 @@ export const useContactsController = () => {
           status: 'ACTIVE',
           stage: ContactStage.LEAD,
           totalValue: 0,
+          notes: formData.notes || undefined,
         },
         {
           onSuccess: () => {

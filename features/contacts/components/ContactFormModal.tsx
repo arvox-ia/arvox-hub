@@ -11,6 +11,7 @@ interface ContactFormData {
   phone: string;
   role: string;
   companyName: string;
+  notes: string;
 }
 
 interface ContactFormModalProps {
@@ -68,6 +69,7 @@ export const ContactFormModal: React.FC<ContactFormModalProps> = ({
       phone: fake.phone,
       role: fake.role,
       companyName: fake.companyName,
+      notes: '',
     });
   };
 
@@ -190,6 +192,19 @@ export const ContactFormModal: React.FC<ContactFormModalProps> = ({
                 ? 'Edite para alterar a empresa. Deixe em branco para desvincular.'
                 : 'Se a empresa já existir, o contato será vinculado a ela.'}
             </p>
+          </div>
+          <div>
+            <label htmlFor="contact-notes" className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              Notas
+            </label>
+            <textarea
+              id="contact-notes"
+              rows={3}
+              className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 resize-y"
+              placeholder="Anotações sobre o contato (origem, contexto, necessidades...)"
+              value={formData.notes}
+              onChange={e => setFormData({ ...formData, notes: e.target.value })}
+            />
           </div>
 
             <button
