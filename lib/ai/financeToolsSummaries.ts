@@ -9,7 +9,7 @@
  * `features/finance/core/*`.
  */
 
-import { createHash } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { formatBRL } from '@/lib/utils/currency';
 
 export function round2(value: number): number {
@@ -123,25 +123,76 @@ export function formatSetMonthlyGoalSummary(r: ResolvedSetMonthlyGoal): string {
 // ============================================
 
 /**
- * Hash determinístico (não-criptográfico contra adversário; é uma proteção
- * contra DERIVA DO MODELO) de um payload plano. `prepare*` devolve o token;
- * o `confirm*` correspondente reexige o MESMO payload + token. Se qualquer
- * campo mudar entre o `prepare` e o `confirm` — o modelo "lembrou errado",
- * ou tentou pular o prepare inventando valores plausíveis — o hash
- * recomputado no `confirm` não bate e a execução é recusada (ver
- * `lib/ai/financeTools.ts`, cada `confirm*`).
+ * Comprimento do token em caracteres hex. >= 32 (128 bits) — sano o
+ * suficiente para não ser adivinhável por tentativa, mesmo no fallback sem
+ * segredo (achado da revisão: 16 chars/64 bits era curto demais).
+ */
+const CONFIRMATION_TOKEN_HEX_LENGTH = 32;
+
+/** Emite o warning de segredo ausente no máximo uma vez por processo — evita spam de log a cada chamada de tool enquanto a env var não é corrigida. */
+let warnedMissingTokenSecret = false;
+
+/**
+ * Segredo usado para amarrar o `confirmationToken` ao processo do servidor.
+ * Reusa `INTERNAL_API_SECRET` (já usado em `app/api/messaging/ai/process/route.ts`
+ * para autenticar webhook → IA) — nunca enviado ao client, então um token
+ * HMAC com ele não é reproduzível fora do servidor. Lido a cada chamada (não
+ * cacheado em nível de módulo) de propósito: em teste, setar/limpar
+ * `process.env.INTERNAL_API_SECRET` no meio do teste precisa refletir sem
+ * exigir reset de módulo (ver `test/financeToolsSummaries.test.ts`).
+ */
+function getTokenSecret(): string | null {
+  const secret = process.env.INTERNAL_API_SECRET;
+  return secret && secret.length > 0 ? secret : null;
+}
+
+/**
+ * Token de confirmação — `prepare*` devolve, o `confirm*` correspondente
+ * reexige o MESMO payload + token. Se qualquer campo mudar entre o `prepare`
+ * e o `confirm` — o modelo "lembrou errado", ou tentou pular o prepare
+ * inventando valores plausíveis — o token recomputado no `confirm` não bate
+ * e a execução é recusada (ver `lib/ai/financeTools.ts`, cada `confirm*`).
+ *
+ * ACHADO DA REVISÃO: a versão anterior era SHA-256 SEM segredo — determinístico
+ * e reproduzível por qualquer um que leia este arquivo (o código é público no
+ * repo), então não provava confirmação nenhuma contra um agente adversário,
+ * só contra deriva ACIDENTAL do modelo. Agora é HMAC-SHA256 com
+ * `INTERNAL_API_SECRET` (segredo server-only, nunca enviado ao client) — só
+ * quem roda no servidor consegue computar o token certo.
+ *
+ * Se `INTERNAL_API_SECRET` não estiver configurado (dev local sem `.env`,
+ * ambiente mal configurado), cai de volta pro SHA-256 sem segredo — melhor
+ * degradar a proteção (ainda barra deriva acidental) do que quebrar toda
+ * confirmação financeira; um `console.warn` sinaliza o problema pra ser
+ * corrigido antes de produção.
  */
 export function computeConfirmationToken(kind: string, payload: Record<string, string | number | null>): string {
   const sortedKeys = Object.keys(payload).sort();
   const canonical = sortedKeys.map((k) => `${k}=${payload[k]}`).join('&');
-  return createHash('sha256').update(`${kind}:${canonical}`).digest('hex').slice(0, 16);
+  const message = `${kind}:${canonical}`;
+
+  const secret = getTokenSecret();
+  if (!secret) {
+    if (!warnedMissingTokenSecret) {
+      warnedMissingTokenSecret = true;
+      console.warn(
+        '[financeTools] INTERNAL_API_SECRET não configurado — confirmationToken das tools financeiras caiu para SHA-256 sem segredo (reproduzível fora do servidor, protege só contra deriva acidental do modelo). Configure INTERNAL_API_SECRET antes de produção.'
+      );
+    }
+    return createHash('sha256').update(message).digest('hex').slice(0, CONFIRMATION_TOKEN_HEX_LENGTH);
+  }
+
+  return createHmac('sha256', secret).update(message).digest('hex').slice(0, CONFIRMATION_TOKEN_HEX_LENGTH);
 }
 
-/** Recomputa o token a partir do payload atual e compara com o token submetido. */
+/** Recomputa o token a partir do payload atual e compara com o token submetido (tempo constante). */
 export function verifyConfirmationToken(
   kind: string,
   payload: Record<string, string | number | null>,
   token: string
 ): boolean {
-  return computeConfirmationToken(kind, payload) === token;
+  const expected = computeConfirmationToken(kind, payload);
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(token || '', 'utf8');
+  return expectedBuf.length === providedBuf.length && timingSafeEqual(expectedBuf, providedBuf);
 }

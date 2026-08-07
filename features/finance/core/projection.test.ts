@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { buildProjection } from './projection'
+import { buildProjection, computeContractedTaxProvision } from './projection'
 import type { ProjectionInput } from './types'
+
+describe('computeContractedTaxProvision', () => {
+  it('é taxRate% sobre o contratado', () => {
+    expect(computeContractedTaxProvision(1000, 6)).toBe(60)
+  })
+
+  it('arredonda para 2 casas', () => {
+    expect(computeContractedTaxProvision(89.99, 6)).toBe(5.4)
+  })
+
+  it('taxRate 0 → provisão 0, independente do contratado', () => {
+    expect(computeContractedTaxProvision(5000, 0)).toBe(0)
+  })
+
+  it('é a MESMA fórmula usada internamente por buildProjection para taxProvision (não pode divergir)', () => {
+    const input: ProjectionInput = {
+      months: ['2026-01'],
+      receivables: [{ dueDate: '2026-01-10', amount: 1234.56 }],
+      expenseEntries: [],
+      fixedRules: [],
+      weighted: {},
+      taxRate: 7.5,
+      initialBalance: 0,
+    }
+    const [point] = buildProjection(input)
+    expect(point.taxProvision).toBe(computeContractedTaxProvision(point.contracted, input.taxRate))
+  })
+})
 
 /** Input-base para os testes; cada teste sobrescreve só o que precisa. */
 function makeInput(overrides: Partial<ProjectionInput> = {}): ProjectionInput {

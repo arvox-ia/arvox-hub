@@ -34,6 +34,20 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
+/**
+ * Provisão de imposto sobre a receita CONTRATADA (curva piso) — `contracted × taxRatePercent/100`.
+ * Extraída como função exportada (achado da revisão da Task 11) para ser a ÚNICA fonte de
+ * verdade dessa fórmula: `buildProjection` a usa internamente para `taxProvision`, e qualquer
+ * consumidor que precise da provisão de UM mês isolado sem rodar a projeção inteira (ex.:
+ * `getFinanceOverview` em `lib/ai/financeTools.ts`) importa esta função em vez de reescrever
+ * `contracted * (taxRate / 100)` — evita a IA e o dashboard divergirem se a fórmula um dia mudar
+ * num lugar só. Irmã de `computeProbableTaxProvision` (`./dashboardMetrics.ts`), que faz o mesmo
+ * para a curva provável.
+ */
+export function computeContractedTaxProvision(contracted: number, taxRatePercent: number): number {
+  return round2(contracted * (taxRatePercent / 100))
+}
+
 function sumByMonth(entries: ProjectionDueEntry[]): MonthlyAmounts {
   const map: MonthlyAmounts = {}
   for (const entry of entries) {
@@ -77,7 +91,7 @@ export function buildProjection(input: ProjectionInput): ProjectionPoint[] {
       .reduce((sum, rule) => sum + rule.amount, 0)
     const expenses = round2(materializedExpenses + unmaterializedFixed)
 
-    const taxProvision = round2(contracted * (input.taxRate / 100))
+    const taxProvision = computeContractedTaxProvision(contracted, input.taxRate)
     const probableProvision = round2(probable * (input.taxRate / 100))
 
     balanceFloor = round2(balanceFloor + (contracted - expenses - taxProvision))

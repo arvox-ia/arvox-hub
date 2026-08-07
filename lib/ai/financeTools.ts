@@ -36,7 +36,7 @@ import { format } from 'date-fns';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
 import { sanitizePostgrestValue } from '@/lib/utils/sanitize';
 import { formatBRL } from '@/lib/utils/currency';
-import { buildProjection } from '@/features/finance/core/projection';
+import { buildProjection, computeContractedTaxProvision } from '@/features/finance/core/projection';
 import { addMonthsToKey, weightDeals } from '@/features/finance/core/pipeline';
 import { mapOpenDealForProjection } from '@/features/finance/core/dealMapping';
 import { computeMonthKpis } from '@/features/finance/core/dashboardMetrics';
@@ -144,7 +144,9 @@ export function createFinanceTools(context: FinanceToolsContext, userId: string)
         const contracted = round2(
           receivables.filter((r) => r.dueDate.slice(0, 7) === monthKey).reduce((sum, r) => sum + r.amount, 0)
         );
-        const provisaoImposto = round2(contracted * (taxRate / 100));
+        // Mesma fórmula que `buildProjection` usa internamente para `taxProvision` (curva
+        // piso) — importada do core em vez de reescrita aqui, pra dashboard e IA nunca divergirem.
+        const provisaoImposto = computeContractedTaxProvision(contracted, taxRate);
         const kpis = computeMonthKpis(receivables, (entriesRes.data as any[]) || [], provisaoImposto, monthKey);
         const meta = (goalRes.data as any)?.target_value ?? 0;
 
@@ -401,6 +403,51 @@ export function createFinanceTools(context: FinanceToolsContext, userId: string)
           return {
             error:
               'Os dados não conferem com a confirmação gerada pelo prepareCreateExpense (algum valor foi alterado, ou o token é de outro resumo). Rode prepareCreateExpense novamente e confirme o resumo exato.',
+          };
+        }
+
+        // Idempotência (achado da revisão): diferente de confirmMarkReceivablePaid (a
+        // revalidação já vê status != PENDING numa 2ª chamada) e confirmSetMonthlyGoal
+        // (upsert), este é um INSERT puro — um retry do modelo, um retry de rede, ou o
+        // usuário dizendo "confirma" duas vezes criaria duas despesas idênticas, e não há
+        // caminho de exclusão na UI para limpar isso. Antes de inserir, procura uma despesa
+        // não deletada da MESMA org com os MESMOS description+category+amount+kind+
+        // (dueDay|dueDate) criada nos últimos ~2 minutos; se achar, é (quase certamente) o
+        // resultado do próprio confirm anterior — devolve como sucesso sem inserir de novo.
+        const dedupeWindowStart = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+        let dedupeQuery = supabase
+          .from('finance_expenses')
+          .select('id, description, amount, created_at')
+          .eq('organization_id', organizationId)
+          .is('deleted_at', null)
+          .eq('description', trimmedDescription)
+          .eq('category', category)
+          .eq('amount', roundedAmount)
+          .eq('kind', kind)
+          .gte('created_at', dedupeWindowStart)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        dedupeQuery =
+          normalizedDueDay === null ? dedupeQuery.is('due_day', null) : dedupeQuery.eq('due_day', normalizedDueDay);
+        dedupeQuery =
+          normalizedDueDate === null ? dedupeQuery.is('due_date', null) : dedupeQuery.eq('due_date', normalizedDueDate);
+
+        const { data: dupe, error: dupeError } = await dedupeQuery.maybeSingle();
+        if (dupeError) {
+          // Não bloqueia a criação por causa de uma falha na checagem em si — melhor um
+          // duplicado raro (o cenário que já tínhamos antes deste fix) do que travar toda
+          // escrita financeira por uma falha transitória nesta query auxiliar.
+          console.warn('[financeTools] falha ao checar idempotência de confirmCreateExpense', {
+            message: dupeError?.message,
+          });
+        } else if (dupe) {
+          return {
+            success: true,
+            alreadyExists: true,
+            message: `Essa despesa já foi lançada há pouco: "${(dupe as any).description}" (${formatBRL(
+              (dupe as any).amount
+            )}). Não criei de novo.`,
+            expenseId: (dupe as any).id,
           };
         }
 

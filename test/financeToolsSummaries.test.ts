@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   computeConfirmationToken,
   daysOverdue,
@@ -127,44 +128,114 @@ describe('formatSetMonthlyGoalSummary', () => {
 });
 
 describe('computeConfirmationToken / verifyConfirmationToken', () => {
-  it('é determinístico para o mesmo payload', () => {
-    const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
-    const b = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
-    expect(a).toBe(b);
+  const ORIGINAL_SECRET = process.env.INTERNAL_API_SECRET;
+
+  afterEach(() => {
+    if (ORIGINAL_SECRET === undefined) {
+      delete process.env.INTERNAL_API_SECRET;
+    } else {
+      process.env.INTERNAL_API_SECRET = ORIGINAL_SECRET;
+    }
   });
 
-  it('é independente da ordem das chaves do payload', () => {
-    const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
-    const b = computeConfirmationToken('createExpense', { description: 'x', amount: 89 });
-    expect(a).toBe(b);
+  describe('com INTERNAL_API_SECRET configurado (HMAC-SHA256)', () => {
+    beforeEach(() => {
+      process.env.INTERNAL_API_SECRET = 'segredo-de-teste-nao-usar-em-producao';
+    });
+
+    it('é determinístico para o mesmo payload e o mesmo segredo', () => {
+      const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
+      const b = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
+      expect(a).toBe(b);
+    });
+
+    it('é independente da ordem das chaves do payload', () => {
+      const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
+      const b = computeConfirmationToken('createExpense', { description: 'x', amount: 89 });
+      expect(a).toBe(b);
+    });
+
+    it('muda se qualquer campo do payload mudar', () => {
+      const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
+      const b = computeConfirmationToken('createExpense', { amount: 90, description: 'x' });
+      expect(a).not.toBe(b);
+    });
+
+    it('muda se o "kind" (nome da operação) mudar, mesmo com o mesmo payload', () => {
+      const a = computeConfirmationToken('createExpense', { amount: 89 });
+      const b = computeConfirmationToken('markReceivablePaid', { amount: 89 });
+      expect(a).not.toBe(b);
+    });
+
+    it('muda se o segredo mudar (não é mais reproduzível offline sem ele)', () => {
+      const payload = { amount: 89, description: 'x' };
+      const withSecretA = computeConfirmationToken('createExpense', payload);
+      process.env.INTERNAL_API_SECRET = 'outro-segredo-completamente-diferente';
+      const withSecretB = computeConfirmationToken('createExpense', payload);
+      expect(withSecretA).not.toBe(withSecretB);
+    });
+
+    it('tem pelo menos 32 caracteres hex (>= 128 bits)', () => {
+      const token = computeConfirmationToken('createExpense', { amount: 89 });
+      expect(token.length).toBeGreaterThanOrEqual(32);
+      expect(token).toMatch(/^[0-9a-f]+$/);
+    });
+
+    it('verifyConfirmationToken aceita o token gerado para o mesmo payload', () => {
+      const payload = { receivableId: 'abc-123', amount: 1500 };
+      const token = computeConfirmationToken('markReceivablePaid', payload);
+      expect(verifyConfirmationToken('markReceivablePaid', payload, token)).toBe(true);
+    });
+
+    it('verifyConfirmationToken recusa quando um campo foi alterado após o prepare (deriva do modelo)', () => {
+      const payload = { receivableId: 'abc-123', amount: 1500 };
+      const token = computeConfirmationToken('markReceivablePaid', payload);
+      expect(verifyConfirmationToken('markReceivablePaid', { ...payload, amount: 1501 }, token)).toBe(false);
+    });
+
+    it('verifyConfirmationToken recusa um token inventado (sem acesso ao segredo do servidor)', () => {
+      const payload = { receivableId: 'abc-123', amount: 1500 };
+      expect(verifyConfirmationToken('markReceivablePaid', payload, 'token-chutado-pelo-modelo')).toBe(false);
+    });
+
+    it('um token computado offline (SHA-256 sem segredo) NÃO é aceito quando o segredo está configurado', () => {
+      // Simula o que um agente adversário conseguiria reproduzir lendo só o código-fonte
+      // (sem acesso ao INTERNAL_API_SECRET do servidor): o SHA-256 puro do payload.
+      const payload = { receivableId: 'abc-123', amount: 1500 };
+      const offlineGuess = computeConfirmationTokenWithoutSecretForTest('markReceivablePaid', payload);
+      expect(verifyConfirmationToken('markReceivablePaid', payload, offlineGuess)).toBe(false);
+    });
   });
 
-  it('muda se qualquer campo do payload mudar', () => {
-    const a = computeConfirmationToken('createExpense', { amount: 89, description: 'x' });
-    const b = computeConfirmationToken('createExpense', { amount: 90, description: 'x' });
-    expect(a).not.toBe(b);
-  });
+  describe('sem INTERNAL_API_SECRET (fallback degradado, com aviso)', () => {
+    beforeEach(() => {
+      delete process.env.INTERNAL_API_SECRET;
+    });
 
-  it('muda se o "kind" (nome da operação) mudar, mesmo com o mesmo payload', () => {
-    const a = computeConfirmationToken('createExpense', { amount: 89 });
-    const b = computeConfirmationToken('markReceivablePaid', { amount: 89 });
-    expect(a).not.toBe(b);
-  });
+    it('ainda é determinístico e verificável (protege contra deriva acidental do modelo)', () => {
+      const payload = { amount: 89, description: 'x' };
+      const token = computeConfirmationToken('createExpense', payload);
+      expect(verifyConfirmationToken('createExpense', payload, token)).toBe(true);
+    });
 
-  it('verifyConfirmationToken aceita o token gerado para o mesmo payload', () => {
-    const payload = { receivableId: 'abc-123', amount: 1500 };
-    const token = computeConfirmationToken('markReceivablePaid', payload);
-    expect(verifyConfirmationToken('markReceivablePaid', payload, token)).toBe(true);
-  });
-
-  it('verifyConfirmationToken recusa quando um campo foi alterado após o prepare (deriva do modelo)', () => {
-    const payload = { receivableId: 'abc-123', amount: 1500 };
-    const token = computeConfirmationToken('markReceivablePaid', payload);
-    expect(verifyConfirmationToken('markReceivablePaid', { ...payload, amount: 1501 }, token)).toBe(false);
-  });
-
-  it('verifyConfirmationToken recusa um token inventado', () => {
-    const payload = { receivableId: 'abc-123', amount: 1500 };
-    expect(verifyConfirmationToken('markReceivablePaid', payload, 'token-chutado-pelo-modelo')).toBe(false);
+    it('ainda recusa payload alterado', () => {
+      const payload = { amount: 89, description: 'x' };
+      const token = computeConfirmationToken('createExpense', payload);
+      expect(verifyConfirmationToken('createExpense', { ...payload, amount: 90 }, token)).toBe(false);
+    });
   });
 });
+
+/**
+ * Réplica do fallback SHA-256-sem-segredo de `computeConfirmationToken`, usada só neste teste
+ * para simular o que um agente sem acesso ao `INTERNAL_API_SECRET` do servidor conseguiria
+ * calcular lendo o código-fonte publicado no repo.
+ */
+function computeConfirmationTokenWithoutSecretForTest(
+  kind: string,
+  payload: Record<string, string | number | null>
+): string {
+  const sortedKeys = Object.keys(payload).sort();
+  const canonical = sortedKeys.map((k) => `${k}=${payload[k]}`).join('&');
+  return createHash('sha256').update(`${kind}:${canonical}`).digest('hex').slice(0, 32);
+}
