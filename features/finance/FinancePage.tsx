@@ -1,9 +1,8 @@
 'use client';
 
 import React from 'react';
-import { LayoutDashboard } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { DashboardTab } from './components/DashboardTab';
 import { ContractsTab } from './components/ContractsTab';
 import { ExpensesTab } from './components/ExpensesTab';
 import { SettingsTab } from './components/SettingsTab';
@@ -41,11 +40,7 @@ export const FinancePage: React.FC = () => {
         </TabsList>
 
         <TabsContent value="dashboard">
-          <EmptyState
-            icon={LayoutDashboard}
-            title="Dashboard em construção"
-            description="A visão consolidada de caixa e projeção chega em breve."
-          />
+          <DashboardTab controller={controller} />
         </TabsContent>
 
         <TabsContent value="contracts">

@@ -142,6 +142,45 @@ export const useGoals = (options?: { enabled?: boolean }) => {
   });
 };
 
+/**
+ * TODOS os recebíveis não deletados da organização, sem filtro de período.
+ * Usado pelo Dashboard (Task 9): `buildProjection` precisa dos recebíveis do
+ * horizonte inteiro (não só o mês corrente), e a UpcomingList/alertas de
+ * atraso precisam enxergar vencidos de qualquer mês passado — o mesmo
+ * racional de `financeService.listAllReceivables`, hoje só usado pelo export
+ * CSV sob demanda.
+ */
+export const useAllReceivables = (options?: { enabled?: boolean }) => {
+  const { user, loading: authLoading } = useAuth();
+  const externalEnabled = options?.enabled ?? true;
+
+  return useQuery<FinanceReceivable[]>({
+    queryKey: queryKeys.finance.allReceivables(),
+    queryFn: async () => {
+      const { data, error } = await financeService.listAllReceivables();
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !authLoading && !!user && externalEnabled,
+  });
+};
+
+/** TODOS os lançamentos de despesa não deletados da organização, sem filtro de período — mesmo racional de `useAllReceivables`. */
+export const useAllExpenseEntries = (options?: { enabled?: boolean }) => {
+  const { user, loading: authLoading } = useAuth();
+  const externalEnabled = options?.enabled ?? true;
+
+  return useQuery<FinanceExpenseEntry[]>({
+    queryKey: queryKeys.finance.allEntries(),
+    queryFn: async () => {
+      const { data, error } = await financeService.listAllExpenseEntries();
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !authLoading && !!user && externalEnabled,
+  });
+};
+
 /** Deals abertos (não ganho/perdido/deletado) para o pipeline ponderado. */
 export const useOpenDealsForProjection = (options?: { enabled?: boolean }) => {
   const { user, loading: authLoading } = useAuth();
@@ -258,6 +297,9 @@ export const useMarkReceivablePaid = () => {
       if (contractId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivablesByContract(contractId) });
       }
+      // Cache não-escopado por período (Dashboard, Task 9) — sem otimismo próprio aqui, só
+      // invalida pra puxar o estado real depois que a baixa (ou o rollback) se resolveu.
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.allReceivables() });
     },
   });
 };
@@ -308,6 +350,7 @@ export const useUnmarkReceivablePaid = () => {
       if (contractId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivablesByContract(contractId) });
       }
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.allReceivables() });
     },
   });
 };
@@ -392,6 +435,7 @@ export const useMarkEntryPaid = () => {
     },
     onSettled: (_data, _error, { period }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.allEntries() });
     },
   });
 };
@@ -422,6 +466,7 @@ export const useUnmarkEntryPaid = () => {
     },
     onSettled: (_data, _error, { period }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.allEntries() });
     },
   });
 };
@@ -445,6 +490,7 @@ export const useCreateExpenseEntries = () => {
     },
     onSettled: (_data, _error, { period }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.allEntries() });
     },
   });
 };

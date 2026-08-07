@@ -194,7 +194,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ controller }) => {
                   )}
                   <button
                     type="button"
-                    onClick={() => toggleEntryPaid(row.entryId, isPaid)}
+                    onClick={() => toggleEntryPaid(row.entryId, row.dueDate, isPaid)}
                     className={cn(
                       'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors',
                       isPaid

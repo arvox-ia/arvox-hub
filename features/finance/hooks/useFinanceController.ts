@@ -32,6 +32,9 @@ import {
   useGoals,
   useUpsertGoal,
   useUpsertFinanceSettings,
+  useAllReceivables,
+  useAllExpenseEntries,
+  useOpenDealsForProjection,
 } from '@/lib/query/hooks/useFinanceQuery';
 import { generateReceivables } from '../core/receivables';
 import { generateFixedExpenseEntries, sumByCategory } from '../core/expenses';
@@ -43,7 +46,18 @@ import {
   lastReceivableDueDate,
 } from '../core/contractStatus';
 import { buildContractsCsvRows, buildExpensesCsvRows, buildReceivablesCsvRows } from '../core/csvExport';
-import type { ContractInput, ReceivableEntry } from '../core/types';
+import { buildProjection } from '../core/projection';
+import { addMonthsToKey, weightDeals } from '../core/pipeline';
+import { mapOpenDealForProjection } from '../core/dealMapping';
+import {
+  computeGoalProgressPct,
+  computeMonthKpis,
+  computeProbableTaxProvision,
+  filterUpcoming,
+  type UpcomingItem,
+  type UpcomingRow,
+} from '../core/dashboardMetrics';
+import type { ContractInput, ProjectionInput, ProjectionPoint, ReceivableEntry } from '../core/types';
 import {
   financeService,
   type FinanceContract,
@@ -62,6 +76,17 @@ export type FinanceTab = 'dashboard' | 'contracts' | 'expenses' | 'settings';
 const DEFAULT_HORIZON_MONTHS = 12;
 /** Limiar do badge "vence em Xd" na lista de contratos. */
 const ENDING_SOON_THRESHOLD_DAYS = 30;
+/** Janela (dias) da UpcomingList do Dashboard — recebíveis/lançamentos a vencer. */
+const DASHBOARD_UPCOMING_WINDOW_DAYS = 15;
+/**
+ * Fallbacks de `weightDeals` pro pipeline ponderado do Dashboard — não há
+ * campo em `finance_settings` pra isso ainda (Task 10 pode trazer). Mesmos
+ * valores já usados como default noutros lugares do módulo: 30 dias é o
+ * `defaultCloseDays` usado nos testes de `pipeline.ts`, 5 é o `billingDay`
+ * padrão do form de novo contrato (`ContractFormModal`).
+ */
+const DASHBOARD_DEFAULT_CLOSE_DAYS = 30;
+const DASHBOARD_ASSUMED_BILLING_DAY = 5;
 /** Rótulo pt-BR do status do contrato — só usado na exportação CSV (a UI da lista tem o seu próprio, em ContractsTab). */
 const CONTRACT_STATUS_LABEL: Record<FinanceContract['status'], string> = {
   ACTIVE: 'Ativo',
@@ -157,6 +182,11 @@ export function useFinanceController() {
 
   const { data: contacts = [] } = useContacts();
   const { data: contracts = [], isLoading: contractsLoading } = useContracts();
+
+  // ---------- Dados sem filtro de período, usados pelo Dashboard (Task 9) ----------
+  const { data: allReceivables = [], isLoading: allReceivablesLoading } = useAllReceivables();
+  const { data: allExpenseEntries = [], isLoading: allExpenseEntriesLoading } = useAllExpenseEntries();
+  const { data: openDeals = [], isLoading: openDealsLoading } = useOpenDealsForProjection();
 
   const contactsById = useMemo(() => new Map(contacts.map(c => [c.id, c])), [contacts]);
   const horizonMonths = settings?.projectionMonths ?? DEFAULT_HORIZON_MONTHS;
@@ -618,6 +648,152 @@ export function useFinanceController() {
     }
   };
 
+  // =========================================================================
+  // ---------- Dashboard (Task 9) ----------
+  // =========================================================================
+
+  const taxRate = settings?.taxRate ?? 0;
+  const initialBalance = settings?.initialBalance ?? 0;
+  const currentMonth = today.slice(0, 7);
+
+  /** Meses do horizonte de projeção, `yyyy-MM`, a partir do mês corrente (inclusive) — mesma janela usada por `weightDeals`. */
+  const dashboardProjectionMonths = useMemo(
+    () => Array.from({ length: horizonMonths }, (_, i) => addMonthsToKey(currentMonth, i)),
+    [currentMonth, horizonMonths]
+  );
+
+  /**
+   * Pipeline ponderado do funil aberto. `custom_fields` ainda não tem schema
+   * oficial (Task 10) — `mapOpenDealForProjection` lê defensivamente com
+   * defaults sãos, ver seu comentário de arquivo.
+   */
+  const weightedPipeline = useMemo(
+    () =>
+      weightDeals(openDeals.map(mapOpenDealForProjection), {
+        today,
+        horizonMonths,
+        defaultCloseDays: DASHBOARD_DEFAULT_CLOSE_DAYS,
+        assumedBillingDay: DASHBOARD_ASSUMED_BILLING_DAY,
+      }),
+    [openDeals, today, horizonMonths]
+  );
+
+  /** Regras fixas ATIVAS do catálogo — só essas cobrem, na projeção, meses ainda não materializados em `finance_expense_entries`. */
+  const activeFixedRulesForProjection = useMemo(
+    () =>
+      fixedExpenseRules
+        .filter(e => e.active)
+        .map(e => ({ amount: e.amount, dueDay: e.dueDay ?? 1, expenseId: e.id })),
+    [fixedExpenseRules]
+  );
+
+  /**
+   * A projeção de duas curvas (núcleo puro, `buildProjection`) — a UI NUNCA
+   * reimplementa esta aritmética, só monta o input a partir dos dados já
+   * carregados (`allReceivables`/`allExpenseEntries`, sem filtro de período,
+   * cobrem o horizonte inteiro E qualquer recebível/lançamento atrasado de
+   * meses anteriores).
+   */
+  const projection: ProjectionPoint[] = useMemo(() => {
+    const input: ProjectionInput = {
+      months: dashboardProjectionMonths,
+      receivables: allReceivables.map(r => ({ dueDate: r.dueDate, amount: r.amount })),
+      expenseEntries: allExpenseEntries.map(e => ({ dueDate: e.dueDate, amount: e.amount, expenseId: e.expenseId })),
+      fixedRules: activeFixedRulesForProjection,
+      weighted: weightedPipeline,
+      taxRate,
+      initialBalance,
+    };
+    return buildProjection(input);
+  }, [dashboardProjectionMonths, allReceivables, allExpenseEntries, activeFixedRulesForProjection, weightedPipeline, taxRate, initialBalance]);
+
+  /** Primeiro ponto da projeção = mês corrente (ver `dashboardProjectionMonths`). */
+  const currentMonthProjection = projection[0] ?? null;
+
+  const isDashboardLoading =
+    settingsLoading || contractsLoading || allReceivablesLoading || allExpenseEntriesLoading || openDealsLoading;
+
+  const receivablesThisMonth = useMemo(
+    () => allReceivables.filter(r => r.dueDate.slice(0, 7) === currentMonth),
+    [allReceivables, currentMonth]
+  );
+  const expenseEntriesThisMonth = useMemo(
+    () => allExpenseEntries.filter(e => e.dueDate.slice(0, 7) === currentMonth),
+    [allExpenseEntries, currentMonth]
+  );
+
+  /** Os 4 StatCards do topo do Dashboard. */
+  const monthKpis = useMemo(
+    () => computeMonthKpis(receivablesThisMonth, expenseEntriesThisMonth, currentMonthProjection?.taxProvision ?? 0),
+    [receivablesThisMonth, expenseEntriesThisMonth, currentMonthProjection]
+  );
+
+  /**
+   * Provisão da curva PROVÁVEL do mês corrente. `ProjectionPoint.taxProvision`
+   * é só a provisão da curva CONTRATADA (achado da revisão da Task 4) —
+   * recalculada aqui com a MESMA fórmula que o core usa internamente pra
+   * `balanceProbable` (`probable × taxRate/100`), pra que as duas provisões
+   * mostradas lado a lado na tela nunca divirjam de quem confere na mão.
+   */
+  const probableTaxProvision = useMemo(
+    () => computeProbableTaxProvision(currentMonthProjection?.probable ?? 0, taxRate),
+    [currentMonthProjection, taxRate]
+  );
+
+  /** Meta do mês corrente: `goalRows[0]` é sempre o mês de `today` (ver `goalMonths`). */
+  const currentMonthGoal = goalRows[0]?.targetValue ?? 0;
+  /** "Realizado" = receita contratada do mês (recebido + a receber) — bate com `currentMonthProjection.contracted`. */
+  const currentMonthRealizado = monthKpis.recebido + monthKpis.aReceber;
+  const goalProgressPct = computeGoalProgressPct(currentMonthRealizado, currentMonthGoal);
+
+  /**
+   * Recebíveis + lançamentos de despesa dos próximos `DASHBOARD_UPCOMING_WINDOW_DAYS`
+   * dias — atrasados (de qualquer mês) sempre incluídos e pinados no topo
+   * (`filterUpcoming`). A descrição do recebível é enriquecida com o nome do
+   * contato (via `contract → contact`) quando disponível.
+   */
+  const upcomingRows: UpcomingRow[] = useMemo(() => {
+    const receivableItems: UpcomingItem[] = allReceivables.map(r => {
+      const contract = contractsById.get(r.contractId);
+      const contactName = contract ? contactsById.get(contract.contactId)?.name ?? null : null;
+      return {
+        id: r.id,
+        kind: 'RECEIVABLE',
+        description: contactName ? `${r.description} — ${contactName}` : r.description,
+        amount: r.amount,
+        dueDate: r.dueDate,
+        status: r.status,
+      };
+    });
+    const expenseItems: UpcomingItem[] = allExpenseEntries.map(e => ({
+      id: e.id,
+      kind: 'EXPENSE',
+      description: expensesById.get(e.expenseId)?.description ?? 'Despesa removida',
+      amount: e.amount,
+      dueDate: e.dueDate,
+      status: e.status,
+    }));
+    return filterUpcoming([...receivableItems, ...expenseItems], today, DASHBOARD_UPCOMING_WINDOW_DAYS);
+  }, [allReceivables, allExpenseEntries, contractsById, contactsById, expensesById, today]);
+
+  /** Contratos ativos vencendo em até 30 dias — mesmo flag `endingSoon` já usado na aba Contratos. */
+  const endingSoonContracts = useMemo(() => contractRows.filter(row => row.endingSoon), [contractRows]);
+
+  /** Só os recebíveis atrasados de `upcomingRows` — pro bloco de alertas. */
+  const overdueReceivables = useMemo(
+    () => upcomingRows.filter(row => row.isOverdue && row.kind === 'RECEIVABLE'),
+    [upcomingRows]
+  );
+
+  /** Baixa em 1 clique a partir da UpcomingList — despacha pra mutation certa conforme `kind`. Linhas de `upcomingRows` são sempre PENDING (ver `filterUpcoming`). */
+  const toggleUpcomingPaid = async (row: UpcomingRow) => {
+    if (row.kind === 'RECEIVABLE') {
+      await toggleReceivablePaid(row.id, row.dueDate, false);
+    } else {
+      await toggleEntryPaid(row.id, row.dueDate, false);
+    }
+  };
+
   // ---------- Export CSV (backup, spec §4.4) ----------
   const [isExportingCsv, setIsExportingCsv] = useState(false);
 
@@ -752,5 +928,22 @@ export function useFinanceController() {
     submitGoal,
     exportCsv,
     isExportingCsv,
+
+    // ---------- Dashboard ----------
+    isDashboardLoading,
+    projection,
+    currentMonthProjection,
+    receivablesThisMonth,
+    expenseEntriesThisMonth,
+    monthKpis,
+    taxRate,
+    probableTaxProvision,
+    currentMonthGoal,
+    currentMonthRealizado,
+    goalProgressPct,
+    upcomingRows,
+    toggleUpcomingPaid,
+    endingSoonContracts,
+    overdueReceivables,
   };
 }
