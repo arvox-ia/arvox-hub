@@ -1,11 +1,14 @@
 /**
  * Núcleo puro de agregações da Task 9 (Dashboard financeiro, Fase 1B). Sem
  * I/O, sem `Date.now()` — `today` é sempre parâmetro, listas já vêm
- * resolvidas do controller. Cobre 3 cálculos que a UI do dashboard precisa e
- * que não são "formatação trivial de display" (regra do módulo: qualquer
- * aritmética além disso vive num helper puro testado):
+ * resolvidas (e filtradas por mês) do controller. Cobre os cálculos que a
+ * UI do dashboard precisa e que não são "formatação trivial de display"
+ * (regra do módulo: qualquer aritmética além disso vive num helper puro
+ * testado):
  *
- * - `computeMonthKpis`: os 4 StatCards do mês corrente.
+ * - `computeMonthKpis`: os 4 StatCards do mês corrente. `recebido` é
+ *   baseado em DATA DE PAGAMENTO (`paidAt`), `aReceber` em DATA DE
+ *   VENCIMENTO (`dueDate`) — ver achado da revisão no comentário da função.
  * - `computeProbableTaxProvision`: a provisão da curva PROVÁVEL — não existe
  *   como campo em `ProjectionPoint` (que só expõe a provisão da curva
  *   CONTRATADA em `taxProvision`, ver comentário de `ProjectionInput` em
@@ -28,16 +31,30 @@ function round2(value: number): number {
 // KPIs do mês corrente (4 StatCards)
 // ============================================
 
-/** Recebível/lançamento com status, shape mínimo aceito por `computeMonthKpis`. */
-export interface MonthEntryLike {
+/** Item com valor, shape mínimo aceito por `computeMonthKpis` pro total de despesas (só soma). */
+export interface AmountLike {
+  amount: number
+}
+
+/**
+ * Recebível bruto (qualquer mês de vencimento) aceito por `computeMonthKpis`
+ * — a função filtra internamente por `dueDate`/`paidAt` conforme o KPI, ver
+ * comentário da função. `paidAt` é o timestamp ISO completo (`paid_at` do
+ * banco) ou `null` enquanto `status='PENDING'`.
+ */
+export interface ReceivableForMonthKpis {
   amount: number
   status: 'PENDING' | 'PAID'
+  /** `yyyy-MM-dd` */
+  dueDate: string
+  /** Timestamp ISO completo, ou `null` se ainda não pago. */
+  paidAt: string | null
 }
 
 export interface MonthKpis {
-  /** Recebíveis do mês já com baixa (`status='PAID'`). */
+  /** Recebíveis pagos DENTRO do mês corrente (por `paidAt`, não `dueDate`). */
   recebido: number
-  /** Recebíveis do mês ainda pendentes (`status='PENDING'`). */
+  /** Recebíveis ainda PENDING com vencimento (`dueDate`) no mês corrente. */
   aReceber: number
   /** Total de lançamentos de despesa do mês (qualquer status — mesmo racional do total da ExpensesTab). */
   despesas: number
@@ -46,24 +63,48 @@ export interface MonthKpis {
 }
 
 /**
- * KPIs do mês corrente para os StatCards do dashboard. `contractedProvision`
- * é o `taxProvision` do `ProjectionPoint` do mês corrente — a provisão da
- * curva CONTRATADA, já calculada pelo core (`buildProjection`), nunca
- * recalculada aqui. `recebido + aReceber` é, por construção, o mesmo total
- * que `contracted` do mês corrente (o core soma recebíveis por vencimento
- * ignorando status) — por isso `resultado` fecha exatamente com a curva
- * piso (`balanceFloor`) do primeiro mês da projeção.
+ * KPIs do mês corrente para os StatCards do dashboard. Recebe TODOS os
+ * recebíveis relevantes (não só os que vencem no mês corrente — um
+ * recebível pago este mês pode ter vencido em qualquer mês anterior) e
+ * filtra internamente por `currentMonth` (`yyyy-MM`).
+ *
+ * ACHADO DA REVISÃO (crítico pra confiança nos números): `recebido` e
+ * `aReceber` usam bases de data DIFERENTES, de propósito.
+ * - `recebido` = recebíveis cujo PAGAMENTO (`paidAt`) caiu no mês corrente,
+ *   INDEPENDENTE de quando venceram (`dueDate`). Um recebível vencido em
+ *   julho e pago em agosto é "Recebido" de AGOSTO — nunca de julho (mês que
+ *   o dashboard já passou) e nunca "recebido em nenhum mês" (o bug: filtrar
+ *   por `dueDate` fazia esse valor sumir pra sempre, porque nem julho nem
+ *   agosto batiam com o vencimento original).
+ * - `aReceber` = recebíveis PENDING cujo VENCIMENTO (`dueDate`) cai no mês
+ *   corrente — esse sim é genuinamente um conceito de vencimento ("o que eu
+ *   espero receber este mês"), não de caixa.
+ *
+ * `contractedProvision` é o `taxProvision` do `ProjectionPoint` do mês
+ * corrente — a provisão da curva CONTRATADA, já calculada pelo core
+ * (`buildProjection`), nunca recalculada aqui. `resultado` é portanto uma
+ * métrica de base MISTA (recebido por pagamento + a receber por
+ * vencimento − despesas do mês − provisão sobre o contratado do mês) — ela
+ * NÃO fecha mais com `contracted` nem com a curva piso (`balanceFloor`) do
+ * primeiro mês da projeção (fechava antes, quando `recebido` também era por
+ * vencimento); é uma leitura prática de "como foi o mês", não um ponto da
+ * projeção. A UI deixa essa base explícita pro usuário (ver `DashboardTab`).
  */
 export function computeMonthKpis(
-  receivablesInMonth: MonthEntryLike[],
-  expenseEntriesInMonth: { amount: number }[],
-  contractedProvision: number
+  receivables: ReceivableForMonthKpis[],
+  expenseEntriesInMonth: AmountLike[],
+  contractedProvision: number,
+  currentMonth: string
 ): MonthKpis {
   const recebido = round2(
-    receivablesInMonth.filter(r => r.status === 'PAID').reduce((sum, r) => sum + r.amount, 0)
+    receivables
+      .filter(r => r.paidAt !== null && r.paidAt.slice(0, 7) === currentMonth)
+      .reduce((sum, r) => sum + r.amount, 0)
   )
   const aReceber = round2(
-    receivablesInMonth.filter(r => r.status === 'PENDING').reduce((sum, r) => sum + r.amount, 0)
+    receivables
+      .filter(r => r.status === 'PENDING' && r.dueDate.slice(0, 7) === currentMonth)
+      .reduce((sum, r) => sum + r.amount, 0)
   )
   const despesas = round2(expenseEntriesInMonth.reduce((sum, e) => sum + e.amount, 0))
   const resultado = round2(recebido + aReceber - despesas - contractedProvision)

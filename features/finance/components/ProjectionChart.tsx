@@ -15,6 +15,7 @@ import {
   YAxis,
 } from 'recharts';
 import { formatBRL } from '@/lib/utils/currency';
+import { formatCompactBRL } from '../core/chartFormatting';
 import type { ProjectionPoint } from '../core/types';
 
 interface ProjectionChartProps {
@@ -29,14 +30,6 @@ function monthTickLabel(month: string): string {
 /** `yyyy-MM` → rótulo longo pt-BR (ex.: `janeiro de 2026`), pro tooltip. */
 function monthTooltipLabel(month: string): string {
   return format(parseISO(`${month}-01`), "MMMM 'de' yyyy", { locale: ptBR });
-}
-
-/** `R$ 12k` / `R$ 1,2M` — o eixo Y não cabe `formatBRL` por extenso. */
-function formatCompactBRL(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `R$ ${(value / 1_000_000).toFixed(1).replace('.', ',')}M`;
-  if (abs >= 1_000) return `R$ ${(value / 1_000).toFixed(0)}k`;
-  return `R$ ${value.toFixed(0)}`;
 }
 
 const SERIES_LABEL: Record<string, string> = {

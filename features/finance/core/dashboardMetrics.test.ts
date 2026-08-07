@@ -5,42 +5,96 @@ import {
   computeProbableTaxProvision,
   filterUpcoming,
 } from './dashboardMetrics'
-import type { UpcomingItem } from './dashboardMetrics'
+import type { ReceivableForMonthKpis, UpcomingItem } from './dashboardMetrics'
 
-describe('computeMonthKpis', () => {
-  it('recebido soma só PAID, aReceber soma só PENDING', () => {
-    const receivables = [
-      { amount: 600, status: 'PAID' as const },
-      { amount: 400, status: 'PENDING' as const },
-      { amount: 150, status: 'PAID' as const },
-    ]
-    const out = computeMonthKpis(receivables, [], 0)
-    expect(out.recebido).toBe(750)
-    expect(out.aReceber).toBe(400)
+function makeReceivable(overrides: Partial<ReceivableForMonthKpis> = {}): ReceivableForMonthKpis {
+  return {
+    amount: 100,
+    status: 'PENDING',
+    dueDate: '2026-08-01',
+    paidAt: null,
+    ...overrides,
+  }
+}
+
+describe('computeMonthKpis — recebido é por paidAt, não por dueDate', () => {
+  it('cenário exato da revisão: recebível vencido em julho e pago em agosto conta como Recebido de agosto, nunca de julho', () => {
+    // R1: venceu 15/07, pago 20/07 — pago em julho, fora do mês corrente (agosto).
+    const r1 = makeReceivable({ amount: 100, status: 'PAID', dueDate: '2026-07-15', paidAt: '2026-07-20T12:00:00.000Z' })
+    // R2: venceu 20/07, pago 03/08 — atrasado, mas pago EM AGOSTO.
+    const r2 = makeReceivable({ amount: 200, status: 'PAID', dueDate: '2026-07-20', paidAt: '2026-08-03T09:00:00.000Z' })
+    // R3: venceu 05/08, pago 05/08 — em dia, pago em agosto.
+    const r3 = makeReceivable({ amount: 300, status: 'PAID', dueDate: '2026-08-05', paidAt: '2026-08-05T18:00:00.000Z' })
+    // R4: vence 25/08, ainda pendente.
+    const r4 = makeReceivable({ amount: 400, status: 'PENDING', dueDate: '2026-08-25', paidAt: null })
+    // R5: venceu 10/06, ainda pendente (atrasado de meses atrás — não é "a receber" de agosto).
+    const r5 = makeReceivable({ amount: 500, status: 'PENDING', dueDate: '2026-06-10', paidAt: null })
+
+    const out = computeMonthKpis([r1, r2, r3, r4, r5], [], 0, '2026-08')
+
+    expect(out.recebido).toBe(500) // R2 (200) + R3 (300) — pagos em agosto.
+    expect(out.aReceber).toBe(400) // só R4 — pendente com vencimento em agosto.
   })
 
+  it('recebível pago no mês corrente mas vencido em mês FUTURO (adiantamento) também conta como recebido', () => {
+    const r = makeReceivable({ amount: 150, status: 'PAID', dueDate: '2026-09-01', paidAt: '2026-08-15T10:00:00.000Z' })
+    const out = computeMonthKpis([r], [], 0, '2026-08')
+    expect(out.recebido).toBe(150)
+  })
+
+  it('recebível PAID sem paidAt (dado inconsistente) não conta como recebido de nenhum mês', () => {
+    const r = makeReceivable({ amount: 999, status: 'PAID', dueDate: '2026-08-01', paidAt: null })
+    const out = computeMonthKpis([r], [], 0, '2026-08')
+    expect(out.recebido).toBe(0)
+  })
+})
+
+describe('computeMonthKpis — aReceber é só PENDING vencendo no mês', () => {
+  it('recebível PAID vencendo no mês corrente NÃO conta como aReceber (já foi recebido, mesmo que noutro mês)', () => {
+    const r = makeReceivable({ amount: 700, status: 'PAID', dueDate: '2026-08-10', paidAt: '2026-07-01T00:00:00.000Z' })
+    const out = computeMonthKpis([r], [], 0, '2026-08')
+    expect(out.aReceber).toBe(0)
+  })
+
+  it('soma todos os PENDING cujo dueDate cai no mês corrente', () => {
+    const receivables = [
+      makeReceivable({ amount: 400, status: 'PENDING', dueDate: '2026-08-05' }),
+      makeReceivable({ amount: 600, status: 'PENDING', dueDate: '2026-08-28' }),
+      makeReceivable({ amount: 999, status: 'PENDING', dueDate: '2026-09-01' }), // fora do mês
+    ]
+    const out = computeMonthKpis(receivables, [], 0, '2026-08')
+    expect(out.aReceber).toBe(1000)
+  })
+})
+
+describe('computeMonthKpis — despesas e resultado', () => {
   it('despesas soma todos os lançamentos do mês, independente de status', () => {
-    const out = computeMonthKpis([], [{ amount: 200 }, { amount: 300 }], 0)
+    const out = computeMonthKpis([], [{ amount: 200 }, { amount: 300 }], 0, '2026-08')
     expect(out.despesas).toBe(500)
   })
 
-  it('resultado = recebido + aReceber - despesas - contractedProvision', () => {
+  it('resultado = recebido(paidAt) + aReceber(dueDate) - despesas - contractedProvision', () => {
     const receivables = [
-      { amount: 1000, status: 'PAID' as const },
-      { amount: 500, status: 'PENDING' as const },
+      makeReceivable({ amount: 1000, status: 'PAID', dueDate: '2026-07-01', paidAt: '2026-08-01T00:00:00.000Z' }),
+      makeReceivable({ amount: 500, status: 'PENDING', dueDate: '2026-08-20' }),
     ]
-    const out = computeMonthKpis(receivables, [{ amount: 300 }], 150)
+    const out = computeMonthKpis(receivables, [{ amount: 300 }], 150, '2026-08')
     // 1000 + 500 - 300 - 150 = 1050
     expect(out.resultado).toBe(1050)
   })
 
   it('entrada vazia → tudo zero', () => {
-    const out = computeMonthKpis([], [], 0)
+    const out = computeMonthKpis([], [], 0, '2026-08')
     expect(out).toEqual({ recebido: 0, aReceber: 0, despesas: 0, resultado: 0 })
   })
 
   it('arredonda pra 2 casas', () => {
-    const out = computeMonthKpis([{ amount: 10.005, status: 'PAID' }], [], 0)
+    const out = computeMonthKpis(
+      [makeReceivable({ amount: 10.005, status: 'PAID', paidAt: '2026-08-01T00:00:00.000Z' })],
+      [],
+      0,
+      '2026-08'
+    )
     expect(out.recebido).toBe(10.01)
   })
 })

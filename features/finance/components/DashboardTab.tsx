@@ -22,6 +22,7 @@ interface DashboardTabProps {
     | 'projection'
     | 'currentMonthProjection'
     | 'receivablesThisMonth'
+    | 'receivablesPaidThisMonth'
     | 'expenseEntriesThisMonth'
     | 'monthKpis'
     | 'taxRate'
@@ -58,6 +59,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ controller }) => {
     projection,
     currentMonthProjection,
     receivablesThisMonth,
+    receivablesPaidThisMonth,
     expenseEntriesThisMonth,
     monthKpis,
     taxRate,
@@ -76,7 +78,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ controller }) => {
     return <p className="text-sm text-slate-500 dark:text-slate-400 py-8 text-center">Carregando dashboard...</p>;
   }
 
-  const paidCount = receivablesThisMonth.filter(r => r.status === 'PAID').length;
+  // `paidCount` conta por DATA DE PAGAMENTO (mesma base de `monthKpis.recebido`) — não por
+  // vencimento, senão o card "Recebido" e a contagem embaixo dele contariam coisas diferentes.
+  const paidCount = receivablesPaidThisMonth.length;
   const pendingCount = receivablesThisMonth.filter(r => r.status === 'PENDING').length;
   const expenseCount = expenseEntriesThisMonth.length;
   const resultadoPositivo = monthKpis.resultado >= 0;
@@ -105,48 +109,70 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ controller }) => {
   return (
     <div className="space-y-6">
       {/* ---------- StatCards do mês corrente ---------- */}
+      {/*
+        "Recebido" e "A receber" usam bases de DATA diferentes de propósito
+        (achado da revisão): Recebido é por data de PAGAMENTO — um recebível
+        vencido no mês passado e pago agora conta aqui, neste mês, mesmo que
+        tenha vencido antes. A receber é por VENCIMENTO. A legenda abaixo de
+        cada card deixa isso explícito, pra ninguém ter que adivinhar.
+      */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Recebido"
-          value={formatBRL(monthKpis.recebido)}
-          subtext={`${paidCount} recebível(is)`}
-          subtextPositive
-          comparisonLabel=""
-          icon={Wallet}
-          variant="success"
-        />
-        <StatCard
-          title="A receber"
-          value={formatBRL(monthKpis.aReceber)}
-          subtext={`${pendingCount} pendente(s)`}
-          subtextPositive
-          comparisonLabel=""
-          icon={Clock}
-          variant="info"
-        />
-        <StatCard
-          title="Despesas"
-          value={formatBRL(monthKpis.despesas)}
-          subtext={`${expenseCount} lançamento(s)`}
-          subtextPositive
-          comparisonLabel=""
-          icon={Receipt}
-          variant="warning"
-        />
-        <StatCard
-          title="Resultado"
-          value={formatBRL(monthKpis.resultado)}
-          subtext={resultadoPositivo ? 'Positivo' : 'Negativo'}
-          subtextPositive={resultadoPositivo}
-          comparisonLabel=""
-          icon={resultadoPositivo ? TrendingUp : TrendingDown}
-          variant={resultadoPositivo ? 'primary' : 'danger'}
-        />
+        <div title="Soma dos recebíveis pagos neste mês, pela data de pagamento — não pela data de vencimento.">
+          <StatCard
+            title="Recebido"
+            value={formatBRL(monthKpis.recebido)}
+            subtext={`${paidCount} recebível(is)`}
+            subtextPositive
+            comparisonLabel=""
+            icon={Wallet}
+            variant="success"
+          />
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">recebido no mês (data de pagamento)</p>
+        </div>
+        <div title="Soma dos recebíveis ainda pendentes cujo vencimento cai neste mês — independente de quando forem pagos de fato.">
+          <StatCard
+            title="A receber"
+            value={formatBRL(monthKpis.aReceber)}
+            subtext={`${pendingCount} pendente(s)`}
+            subtextPositive
+            comparisonLabel=""
+            icon={Clock}
+            variant="info"
+          />
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">a vencer no mês (data de vencimento)</p>
+        </div>
+        <div title="Soma dos lançamentos de despesa com vencimento neste mês, pagos ou não.">
+          <StatCard
+            title="Despesas"
+            value={formatBRL(monthKpis.despesas)}
+            subtext={`${expenseCount} lançamento(s)`}
+            subtextPositive
+            comparisonLabel=""
+            icon={Receipt}
+            variant="warning"
+          />
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">no mês (data de vencimento)</p>
+        </div>
+        <div title="Recebido (pago no mês) + a receber (vencendo no mês) − despesas do mês − provisão de imposto sobre o contratado.">
+          <StatCard
+            title="Resultado"
+            value={formatBRL(monthKpis.resultado)}
+            subtext={resultadoPositivo ? 'Positivo' : 'Negativo'}
+            subtextPositive={resultadoPositivo}
+            comparisonLabel=""
+            icon={resultadoPositivo ? TrendingUp : TrendingDown}
+            variant={resultadoPositivo ? 'primary' : 'danger'}
+          />
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">recebido + a receber − despesas − provisão</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* ---------- Meta vs. realizado ---------- */}
-        <SectionCard title="Meta vs. realizado" description="Receita contratada do mês (recebido + a receber) contra a meta cadastrada.">
+        <SectionCard
+          title="Meta vs. realizado"
+          description="Realizado = recebido no mês (pago) + a receber no mês (a vencer), contra a meta cadastrada."
+        >
           {currentMonthGoal <= 0 ? (
             <EmptyState
               icon={Target}

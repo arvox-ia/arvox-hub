@@ -859,8 +859,22 @@ export function useFinanceController() {
   const isDashboardLoading =
     settingsLoading || contractsLoading || allReceivablesLoading || allExpenseEntriesLoading || openDealsLoading;
 
+  /** Recebíveis com VENCIMENTO no mês corrente (qualquer status) — base do "A receber" (e da contagem "N pendente(s)" na StatCard). */
   const receivablesThisMonth = useMemo(
     () => allReceivables.filter(r => r.dueDate.slice(0, 7) === currentMonth),
+    [allReceivables, currentMonth]
+  );
+  /**
+   * Recebíveis PAGOS no mês corrente (por `paidAt`, não `dueDate`) — base do
+   * "Recebido" (achado da revisão da Task 9: antes filtrava por `dueDate`,
+   * o que fazia um recebível vencido em julho e pago em agosto não aparecer
+   * como recebido em NENHUM mês). Passado para `computeMonthKpis` junto com
+   * `allReceivables` completo, porque um recebível pago este mês pode ter
+   * vencido em qualquer mês anterior — não dá pra pré-filtrar por `dueDate`
+   * do mês corrente antes de olhar `paidAt`.
+   */
+  const receivablesPaidThisMonth = useMemo(
+    () => allReceivables.filter(r => r.paidAt !== null && r.paidAt.slice(0, 7) === currentMonth),
     [allReceivables, currentMonth]
   );
   const expenseEntriesThisMonth = useMemo(
@@ -868,10 +882,15 @@ export function useFinanceController() {
     [allExpenseEntries, currentMonth]
   );
 
-  /** Os 4 StatCards do topo do Dashboard. */
+  /**
+   * Os 4 StatCards do topo do Dashboard. `computeMonthKpis` recebe
+   * `allReceivables` (não `receivablesThisMonth`) porque ela mesma decide,
+   * internamente, quais entram em `recebido` (por `paidAt`) e quais em
+   * `aReceber` (por `dueDate`) — ver comentário da função.
+   */
   const monthKpis = useMemo(
-    () => computeMonthKpis(receivablesThisMonth, expenseEntriesThisMonth, currentMonthProjection?.taxProvision ?? 0),
-    [receivablesThisMonth, expenseEntriesThisMonth, currentMonthProjection]
+    () => computeMonthKpis(allReceivables, expenseEntriesThisMonth, currentMonthProjection?.taxProvision ?? 0, currentMonth),
+    [allReceivables, expenseEntriesThisMonth, currentMonthProjection, currentMonth]
   );
 
   /**
@@ -888,7 +907,14 @@ export function useFinanceController() {
 
   /** Meta do mês corrente: `goalRows[0]` é sempre o mês de `today` (ver `goalMonths`). */
   const currentMonthGoal = goalRows[0]?.targetValue ?? 0;
-  /** "Realizado" = receita contratada do mês (recebido + a receber) — bate com `currentMonthProjection.contracted`. */
+  /**
+   * "Realizado" = `monthKpis.recebido` (por `paidAt`) + `monthKpis.aReceber`
+   * (por `dueDate`) — mesma base MISTA do card "Resultado" (ver comentário
+   * de `computeMonthKpis`). NÃO bate mais com `currentMonthProjection.contracted`
+   * desde que `recebido` passou a ser por data de pagamento: um recebível
+   * vencido em julho e pago em agosto entra em `recebido` de agosto mas
+   * nunca esteve em `contracted` de agosto (que é só por `dueDate`).
+   */
   const currentMonthRealizado = monthKpis.recebido + monthKpis.aReceber;
   const goalProgressPct = computeGoalProgressPct(currentMonthRealizado, currentMonthGoal);
 
@@ -1090,6 +1116,7 @@ export function useFinanceController() {
     projection,
     currentMonthProjection,
     receivablesThisMonth,
+    receivablesPaidThisMonth,
     expenseEntriesThisMonth,
     monthKpis,
     taxRate,
