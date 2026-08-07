@@ -21,6 +21,7 @@ import type {
   FinanceReceivable,
   FinanceSettings,
   NewFinanceContractInput,
+  NewFinanceExpenseEntryInput,
   NewFinanceExpenseInput,
   NewFinanceGoalInput,
   NewReceivableInput,
@@ -391,6 +392,87 @@ export const useMarkEntryPaid = () => {
     },
     onSettled: (_data, _error, { period }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+    },
+  });
+};
+
+/** Desfaz a baixa de um lançamento de despesa. Otimista contra o cache do período informado. */
+export const useUnmarkEntryPaid = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id }: { id: string; period: string }) => {
+      const { data, error } = await financeService.unmarkEntryPaid(id);
+      if (error) throw error;
+      return data!;
+    },
+    onMutate: async ({ id, period }) => {
+      const queryKey = queryKeys.finance.entries(period);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<FinanceExpenseEntry[]>(queryKey);
+      queryClient.setQueryData<FinanceExpenseEntry[]>(queryKey, (old = []) =>
+        old.map(e => (e.id === id ? { ...e, status: 'PENDING', paidAt: null } : e))
+      );
+      return { previous, period };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.finance.entries(context.period), context.previous);
+      }
+    },
+    onSettled: (_data, _error, { period }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+    },
+  });
+};
+
+/**
+ * Cria lançamentos de despesa em lote — usado tanto pela materialização de
+ * regras fixas do mês selecionado (Task 8, `useFinanceController`) quanto
+ * pelo lançamento único de uma despesa pontual recém-criada. `createExpenseEntries`
+ * (data layer) já absorve conflito de corrida (`23505` no índice único
+ * parcial `expense_id+due_date`) como resultado benigno — esta mutation só
+ * invalida o cache do período pra a UI puxar o estado real do banco depois.
+ */
+export const useCreateExpenseEntries = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ entries }: { entries: NewFinanceExpenseEntryInput[]; period: string }) => {
+      const { data, error } = await financeService.createExpenseEntries(entries);
+      if (error) throw error;
+      return data;
+    },
+    onSettled: (_data, _error, { period }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.entries(period) });
+    },
+  });
+};
+
+/**
+ * Atualiza o lançamento (1:1) de uma despesa PONTUAL quando data/valor são
+ * editados no catálogo. Não sabemos o período ANTIGO nem o NOVO do
+ * lançamento a partir daqui (o caller só passa `expenseId`), então invalida
+ * todo o namespace `finance` em vez de tentar escopar por período — mesma
+ * postura conservadora de `useCreateContract`/`useUpdateContract`.
+ */
+export const useUpdateEntryForExpense = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      expenseId,
+      updates,
+    }: {
+      expenseId: string;
+      updates: { dueDate?: string; amount?: number };
+    }) => {
+      const { data, error } = await financeService.updateEntryForExpense(expenseId, updates);
+      if (error) throw error;
+      return data;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
     },
   });
 };

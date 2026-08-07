@@ -1,10 +1,12 @@
 'use client';
 
 import React from 'react';
-import { LayoutDashboard, Receipt, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ContractsTab } from './components/ContractsTab';
+import { ExpensesTab } from './components/ExpensesTab';
+import { SettingsTab } from './components/SettingsTab';
 import { useFinanceController, type FinanceTab } from './hooks/useFinanceController';
 
 const TAB_CONFIG: { id: FinanceTab; label: string }[] = [
@@ -51,19 +53,11 @@ export const FinancePage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="expenses">
-          <EmptyState
-            icon={Receipt}
-            title="Despesas em construção"
-            description="Cadastro de despesas fixas e pontuais chega em breve."
-          />
+          <ExpensesTab controller={controller} />
         </TabsContent>
 
         <TabsContent value="settings">
-          <EmptyState
-            icon={SettingsIcon}
-            title="Configurações em construção"
-            description="Metas, alíquota de imposto e saldo inicial chegam em breve."
-          />
+          <SettingsTab controller={controller} />
         </TabsContent>
       </Tabs>
     </div>

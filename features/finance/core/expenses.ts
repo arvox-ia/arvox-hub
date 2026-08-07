@@ -26,8 +26,28 @@ export function generateFixedExpenseEntries(
     entries.push({
       dueDate: clampDay(targetYear, targetMonthIndex0, rule.dueDay),
       amount: rule.amount,
+      expenseId: rule.expenseId,
     })
   }
 
   return entries
+}
+
+/** Item com categoria + valor — shape mínimo aceito por `sumByCategory`. */
+export interface CategorizedAmount {
+  category: string
+  amount: number
+}
+
+/**
+ * Soma valores agrupados por categoria. Puro, genérico o bastante pra
+ * qualquer lista de itens com `category`/`amount` (usado pela ExpensesTab
+ * para os totais por categoria do mês selecionado).
+ */
+export function sumByCategory(items: CategorizedAmount[]): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const item of items) {
+    totals[item.category] = (totals[item.category] ?? 0) + item.amount
+  }
+  return totals
 }

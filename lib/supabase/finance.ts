@@ -316,6 +316,14 @@ export type NewFinanceGoalInput = {
   targetValue: number;
 };
 
+/** Lançamento de despesa pronto pra inserir — já com `dueDate`/`amount` resolvidos pelo core. */
+export type NewFinanceExpenseEntryInput = {
+  expenseId: string;
+  /** `yyyy-MM-dd` */
+  dueDate: string;
+  amount: number;
+};
+
 // ============================================
 // TRANSFORMS
 // ============================================
@@ -892,6 +900,167 @@ export const financeService = {
 
       if (error) return { data: null, error };
       return { data: transformExpenseEntry(data as DbFinanceExpenseEntry), error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /** Desfaz a baixa de um lançamento de despesa (`status='PENDING'`, `paid_at=null`). */
+  async unmarkEntryPaid(id: string): Promise<{ data: FinanceExpenseEntry | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+      const { data, error } = await supabase
+        .from('finance_expense_entries')
+        .update({ status: 'PENDING', paid_at: null })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) return { data: null, error };
+      return { data: transformExpenseEntry(data as DbFinanceExpenseEntry), error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /**
+   * Cria lançamentos de despesa em lote (materialização de regras fixas do
+   * mês, Task 8, ou o lançamento único de uma despesa pontual). Idempotente
+   * e safe contra corrida: o schema tem um índice único parcial em
+   * `(expense_id, due_date) WHERE deleted_at IS NULL` — como esse índice é
+   * PARCIAL, `upsert(..., { ignoreDuplicates: true })` do PostgREST não o
+   * infere como arbiter (Postgres só infere índice parcial em ON CONFLICT
+   * quando o predicate é explicitado, o que o PostgREST não expõe), então
+   * usamos INSERT simples e tratamos a violação (`23505`) como resultado
+   * benigno em vez de deixá-la subir como erro.
+   *
+   * Estratégia: tenta o lote inteiro primeiro (caminho feliz, 1 round-trip).
+   * Se QUALQUER linha colidir, o Postgres rejeita o INSERT inteiro — cai
+   * então para insert linha a linha, engolindo só as colisões (`23505`) e
+   * devolvendo as que de fato foram criadas; erro de outra natureza em
+   * qualquer linha aborta e é reportado.
+   */
+  async createExpenseEntries(
+    entries: NewFinanceExpenseEntryInput[]
+  ): Promise<{ data: FinanceExpenseEntry[]; error: Error | null }> {
+    try {
+      if (!supabase) return { data: [], error: new Error('Supabase não configurado') };
+      if (entries.length === 0) return { data: [], error: null };
+      const organizationId = await getCurrentOrganizationId();
+      if (!organizationId) return { data: [], error: new Error('Organização não encontrada') };
+
+      const insertRows = entries.map(e => ({
+        expense_id: e.expenseId,
+        due_date: e.dueDate,
+        amount: e.amount,
+        organization_id: organizationId,
+      }));
+
+      const { data, error } = await supabase.from('finance_expense_entries').insert(insertRows).select();
+
+      if (!error) {
+        return { data: (data || []).map(r => transformExpenseEntry(r as DbFinanceExpenseEntry)), error: null };
+      }
+
+      if ((error as { code?: string }).code !== '23505') {
+        return { data: [], error };
+      }
+
+      // Corrida detectada: alguma linha do lote já existe. Refaz uma a uma
+      // pra separar quem colidiu (benigno, já materializado por outra
+      // chamada concorrente) de quem não.
+      const created: FinanceExpenseEntry[] = [];
+      for (const row of insertRows) {
+        const { data: single, error: singleError } = await supabase
+          .from('finance_expense_entries')
+          .insert(row)
+          .select()
+          .maybeSingle();
+
+        if (singleError) {
+          if ((singleError as { code?: string }).code === '23505') continue; // já existe — benigno
+          return { data: created, error: singleError };
+        }
+        if (single) created.push(transformExpenseEntry(single as DbFinanceExpenseEntry));
+      }
+      return { data: created, error: null };
+    } catch (e) {
+      return { data: [], error: e as Error };
+    }
+  },
+
+  /**
+   * Atualiza o lançamento associado a uma despesa PONTUAL (`kind='ONE_TIME'`)
+   * quando a data/valor são editados no catálogo. Só faz sentido pra
+   * pontuais — a relação é 1:1 (um único lançamento, criado junto com a
+   * despesa em `createExpense` + `createExpenseEntries`). Despesas FIXAS
+   * nunca chamam isto: editar a regra não deve alterar lançamentos de meses
+   * já materializados (mesmo racional de `updateContract`, que nunca
+   * regenera recebíveis já persistidos).
+   */
+  async updateEntryForExpense(
+    expenseId: string,
+    updates: { dueDate?: string; amount?: number }
+  ): Promise<{ data: FinanceExpenseEntry | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+
+      const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (updates.dueDate !== undefined) dbUpdates.due_date = updates.dueDate;
+      if (updates.amount !== undefined) dbUpdates.amount = updates.amount;
+
+      const { data, error } = await supabase
+        .from('finance_expense_entries')
+        .update(dbUpdates)
+        .eq('expense_id', expenseId)
+        .is('deleted_at', null)
+        .select()
+        .maybeSingle();
+
+      if (error) return { data: null, error };
+      return { data: data ? transformExpenseEntry(data as DbFinanceExpenseEntry) : null, error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /**
+   * Lista TODOS os recebíveis não deletados da organização, sem filtro de
+   * período — usado só pela exportação CSV (Task 8, spec §4.4), que precisa
+   * do histórico completo, não de um mês.
+   */
+  async listAllReceivables(): Promise<{ data: FinanceReceivable[] | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+      const { data, error } = await supabase
+        .from('finance_receivables')
+        .select('*')
+        .is('deleted_at', null)
+        .order('due_date', { ascending: true });
+
+      if (error) return { data: null, error };
+      return { data: (data || []).map(r => transformReceivable(r as DbFinanceReceivable)), error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /**
+   * Lista TODOS os lançamentos de despesa não deletados da organização, sem
+   * filtro de período — mesmo racional de `listAllReceivables`, só pra
+   * exportação CSV.
+   */
+  async listAllExpenseEntries(): Promise<{ data: FinanceExpenseEntry[] | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+      const { data, error } = await supabase
+        .from('finance_expense_entries')
+        .select('*')
+        .is('deleted_at', null)
+        .order('due_date', { ascending: true });
+
+      if (error) return { data: null, error };
+      return { data: (data || []).map(e => transformExpenseEntry(e as DbFinanceExpenseEntry)), error: null };
     } catch (e) {
       return { data: null, error: e as Error };
     }

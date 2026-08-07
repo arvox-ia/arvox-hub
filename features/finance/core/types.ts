@@ -42,11 +42,33 @@ export interface ReceivableEntry {
   description: string;
 }
 
-/** Regra de uma despesa fixa recorrente. */
+/** Categorias fixas de despesa do spec (§4.4) — única fonte de verdade pro select da UI. */
+export const EXPENSE_CATEGORIES = [
+  'Ferramentas & APIs',
+  'Pró-labore',
+  'Impostos',
+  'Marketing próprio',
+  'Terceiros',
+  'Taxas',
+  'Outros',
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/**
+ * Regra de uma despesa fixa recorrente. Carrega `expenseId` — o id da despesa
+ * de catálogo (`finance_expenses.id`) dona da regra — pelo mesmo motivo que
+ * `ProjectionFixedRule` carrega: sem ele, a projeção (Task 9) não consegue
+ * dizer "esta regra específica já foi materializada neste mês" e teria que
+ * voltar a dedupar por mês inteiro (o que subestima despesas — ver comentário
+ * de `ProjectionFixedRule`). Fechado o seam apontado pela review da Task 8.
+ */
 export interface FixedExpenseRule {
   amount: number;
   /** Dia do mês (1-28) em que a despesa vence. */
   dueDay: number;
+  /** Id da despesa de catálogo (`finance_expenses.id`) dona desta regra. */
+  expenseId: string;
 }
 
 /** Opções de geração de lançamentos de despesa fixa. */
@@ -57,11 +79,19 @@ export interface GenerateFixedExpenseEntriesOptions {
   months: number;
 }
 
-/** Um lançamento de despesa fixa gerado (ainda não persistido). */
+/**
+ * Um lançamento de despesa fixa gerado (ainda não persistido). Carrega
+ * `expenseId` (herdado da `FixedExpenseRule` que o gerou) para que o
+ * controller consiga montar o insert em `finance_expense_entries` (coluna
+ * `expense_id`, NOT NULL) sem recompor a associação regra→entry por fora, e
+ * para que os dados cheguem já no formato de `ProjectionExpenseEntry`.
+ */
 export interface FixedExpenseEntry {
   /** `yyyy-MM-dd` */
   dueDate: string;
   amount: number;
+  /** Id da despesa de catálogo (`finance_expenses.id`) que originou este lançamento. */
+  expenseId: string;
 }
 
 /**
