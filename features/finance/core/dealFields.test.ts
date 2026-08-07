@@ -72,6 +72,36 @@ describe('parseDealFinanceFields — valores como string (digitação real via <
   })
 })
 
+describe('parseDealFinanceFields — desambiguação de ponto/vírgula (achado da revisão pós-deploy)', () => {
+  it('"1.500" (só ponto, grupo de 3 dígitos) → separador de milhar, não decimal', () => {
+    expect(parseDealFinanceFields({ valorMensal: '1.500' }).monthlyValue).toBe(1500)
+  })
+
+  it('"1.500.000" (múltiplos pontos de milhar) → 1500000', () => {
+    expect(parseDealFinanceFields({ valorMensal: '1.500.000' }).monthlyValue).toBe(1500000)
+  })
+
+  it('"1.5" (só ponto, grupo de 1 dígito) → decimal, não milhar', () => {
+    expect(parseDealFinanceFields({ valorMensal: '1.5' }).monthlyValue).toBe(1.5)
+  })
+
+  it('"1500.50" (só ponto, grupo de 2 dígitos) → decimal', () => {
+    expect(parseDealFinanceFields({ valorMensal: '1500.50' }).monthlyValue).toBe(1500.5)
+  })
+
+  it('"1.500,00" (formato pt-BR completo: ponto de milhar + vírgula decimal) → 1500', () => {
+    expect(parseDealFinanceFields({ valorMensal: '1.500,00' }).monthlyValue).toBe(1500)
+  })
+
+  it('"899,90" (só vírgula) → decimal, 899.9', () => {
+    expect(parseDealFinanceFields({ valorMensal: '899,90' }).monthlyValue).toBe(899.9)
+  })
+
+  it('"R$ 1.500" (prefixo de moeda) → não tenta adivinhar símbolo, cai no default conservador', () => {
+    expect(parseDealFinanceFields({ valorMensal: 'R$ 1.500' }).monthlyValue).toBe(0)
+  })
+})
+
 describe('parseDealFinanceFields — valores malformados', () => {
   it('valorMensal não-numérico → default', () => {
     expect(parseDealFinanceFields({ valorMensal: 'abc' }).monthlyValue).toBe(0)

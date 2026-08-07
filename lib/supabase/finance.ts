@@ -586,7 +586,20 @@ export const financeService = {
         .select()
         .single();
 
-      if (contractError) return { data: null, error: contractError };
+      if (contractError) {
+        // 23505 = unique_violation. Só pode ser o índice parcial
+        // `uniq_finance_contracts_deal` (migration
+        // 20260807130000_finance_contracts_unique_deal.sql) disparando —
+        // nenhuma outra coluna de `finance_contracts` tem constraint de
+        // unicidade. Cobre a corrida de duas abas/dois admins importando o
+        // MESMO deal ganho ao mesmo tempo (achado da revisão: a exclusão de
+        // `importableDealRows` no controller é só client-cache, não uma
+        // trava real).
+        if (contractError.code === '23505' && insertData.deal_id) {
+          return { data: null, error: new Error('Este negócio já foi importado como contrato.') };
+        }
+        return { data: null, error: contractError };
+      }
       const dbContract = contractRow as DbFinanceContract;
 
       if (receivables.length === 0) {

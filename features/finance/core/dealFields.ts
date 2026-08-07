@@ -74,9 +74,33 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Converte um valor cru (número, string numérica — inclusive com vírgula
- * decimal, digitação manual pt-BR — ou qualquer outra coisa) num número
- * finito, ou `null` se não for um número válido. Nunca lança.
+ * Converte um valor cru (número, string numérica — inclusive digitação
+ * manual pt-BR — ou qualquer outra coisa) num número finito, ou `null` se
+ * não for um número válido. Nunca lança.
+ *
+ * ## Desambiguação de string (achado da revisão pós-deploy)
+ *
+ * `<input type="number">` sempre usa `.` como separador decimal (formato
+ * canônico do value do DOM, independente do locale do navegador) — mas
+ * texto digitado fora desse input (API/IA, ou copiar/colar de outro lugar)
+ * pode vir em qualquer um dos formatos abaixo. A ambiguidade real é só o
+ * caso "só ponto, sem vírgula": `"1.500"` pode ser 1500 (separador de
+ * milhar, o mais natural pra um brasileiro digitar) ou 1.5 (decimal). Bug
+ * corrigido aqui: a versão anterior sempre tratava esse caso como decimal,
+ * então `"1.500"` virava silenciosamente `1.5` — 1000× menor, sem erro
+ * visível, distorcendo a curva provável pra baixo.
+ *
+ * Regra de desambiguação (só entra em jogo quando há `.` e NÃO há `,`):
+ * o grupo de dígitos IMEDIATAMENTE APÓS O ÚLTIMO PONTO tem exatamente 3
+ * dígitos → todo `.` é separador de milhar, remove todos (`"1.500"` → 1500,
+ * `"1.500.000"` → 1500000). Caso contrário → o único uso de `.` é decimal,
+ * mantém como está (`"1.5"` → 1.5, `"1500.50"` → 1500.5).
+ *
+ * Quando a string tem `,`: se também tem `.`, assume-se o formato completo
+ * pt-BR (`.` = milhar, `,` = decimal — `"1.500,00"` → 1500); se só tem `,`,
+ * ela é o separador decimal (`"899,90"` → 899.9). Prefixos não-numéricos
+ * (`"R$ 1.500"`) continuam falhando o parse e caindo no default
+ * conservador — não tentamos adivinhar símbolo de moeda.
  */
 function toFiniteNumber(raw: unknown): number | null {
   if (typeof raw === 'number') {
@@ -85,11 +109,25 @@ function toFiniteNumber(raw: unknown): number | null {
   if (typeof raw === 'string') {
     const trimmed = raw.trim()
     if (trimmed === '') return null
-    // <input type="number"> sempre usa '.' como separador decimal (formato
-    // canônico do value do DOM, independente do locale do navegador); só
-    // troca ',' por '.' quando a string não tem '.' — digitação manual
-    // fora desse input (ex.: API/IA) pode vir em pt-BR.
-    const normalized = trimmed.includes(',') && !trimmed.includes('.') ? trimmed.replace(',', '.') : trimmed
+
+    const hasComma = trimmed.includes(',')
+    const hasDot = trimmed.includes('.')
+
+    let normalized: string
+    if (hasComma && hasDot) {
+      // Formato pt-BR completo: '.' = milhar, ',' = decimal.
+      normalized = trimmed.replace(/\./g, '').replace(',', '.')
+    } else if (hasComma) {
+      // Só vírgula: separador decimal pt-BR.
+      normalized = trimmed.replace(',', '.')
+    } else if (hasDot) {
+      // Só ponto: milhar se o grupo após o ÚLTIMO ponto tem 3 dígitos, senão decimal.
+      const lastGroup = trimmed.slice(trimmed.lastIndexOf('.') + 1)
+      normalized = /^\d{3}$/.test(lastGroup) ? trimmed.replace(/\./g, '') : trimmed
+    } else {
+      normalized = trimmed
+    }
+
     const n = Number(normalized)
     return Number.isFinite(n) ? n : null
   }
