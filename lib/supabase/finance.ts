@@ -636,6 +636,66 @@ export const financeService = {
     }
   },
 
+  /**
+   * Encerra um contrato (`status='ENDED'`) e soft-deleta os recebíveis
+   * PENDING ainda não vencidos (`due_date > today`) — passado e já pago
+   * ficam intocados (Task 7, guard de negócio: encerrar não deve apagar
+   * histórico de cobrança). Sem transação multi-statement no client: se o
+   * soft-delete dos recebíveis falhar depois do contrato já ter sido
+   * marcado ENDED, isso é reportado no `error` (nunca silencioso) — o
+   * contrato fica com status correto mas recebíveis futuros ainda
+   * pendentes, precisa de revisão manual.
+   */
+  async endContract(
+    id: string,
+    today: string
+  ): Promise<{ data: { contract: FinanceContract; deletedReceivablesCount: number } | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+
+      const { data: contractRow, error: contractError } = await supabase
+        .from('finance_contracts')
+        .update({ status: 'ENDED', updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (contractError) return { data: null, error: contractError };
+
+      const { data: deletedRows, error: receivablesError } = await supabase
+        .from('finance_receivables')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('contract_id', id)
+        .eq('status', 'PENDING')
+        .is('deleted_at', null)
+        .gt('due_date', today)
+        .select('id');
+
+      if (receivablesError) {
+        console.error('[finance] contrato encerrado mas falha ao soft-deletar recebíveis futuros', {
+          contractId: id,
+          receivablesError,
+        });
+        return {
+          data: null,
+          error: new Error(
+            `Contrato ${id} foi encerrado, mas falhou ao remover recebíveis futuros pendentes (${receivablesError.message}); precisa de revisão manual.`
+          ),
+        };
+      }
+
+      return {
+        data: {
+          contract: transformContract(contractRow as DbFinanceContract),
+          deletedReceivablesCount: (deletedRows || []).length,
+        },
+        error: null,
+      };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
   // ---------- Receivables ----------
 
   /** Lista recebíveis (não deletados) com `due_date` dentro do período `yyyy-MM`. */
@@ -650,6 +710,25 @@ export const financeService = {
         .is('deleted_at', null)
         .gte('due_date', start)
         .lte('due_date', end)
+        .order('due_date', { ascending: true });
+
+      if (error) return { data: null, error };
+      return { data: (data || []).map(r => transformReceivable(r as DbFinanceReceivable)), error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
+  /** Lista TODOS os recebíveis (não deletados) de um contrato, ordenados por vencimento. */
+  async listReceivablesByContract(contractId: string): Promise<{ data: FinanceReceivable[] | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+
+      const { data, error } = await supabase
+        .from('finance_receivables')
+        .select('*')
+        .eq('contract_id', contractId)
+        .is('deleted_at', null)
         .order('due_date', { ascending: true });
 
       if (error) return { data: null, error };

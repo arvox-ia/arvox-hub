@@ -16,6 +16,7 @@ import {
   useUpdateCompany,
   useDeleteCompany,
   useContactHasDeals,
+  useContactHasFinanceContracts,
 } from '@/lib/query/hooks/useContactsQuery';
 import { useCreateDeal } from '@/lib/query/hooks/useDealsQuery';
 import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
@@ -42,6 +43,7 @@ export const useContactsController = () => {
   const deleteContactMutation = useDeleteContact();
   const bulkDeleteContactsMutation = useBulkDeleteContacts();
   const checkHasDealsMutation = useContactHasDeals();
+  const checkHasFinanceContractsMutation = useContactHasFinanceContracts();
   const createCompanyMutation = useCreateCompany();
   const updateCompanyMutation = useUpdateCompany();
   const deleteCompanyMutation = useDeleteCompany();
@@ -252,6 +254,26 @@ export const useContactsController = () => {
 
   const confirmDelete = async () => {
     if (deleteId) {
+      // Fase 1B guard: contato com contrato financeiro vinculado nunca pode
+      // ser excluído (finance_contracts.contact_id é ON DELETE RESTRICT,
+      // sem fluxo de "excluir junto" como o de deals — o contrato precisa
+      // ser encerrado primeiro, na tela de Contratos). Checa isso ANTES do
+      // check de deals para nunca abrir o diálogo de confirmação nesse caso.
+      try {
+        const financeResult = await checkHasFinanceContractsMutation.mutateAsync(deleteId);
+        if (financeResult.hasFinanceContracts) {
+          (addToast || showToast)(
+            'Este contato tem contrato financeiro vinculado. Encerre o contrato antes de excluir.',
+            'error'
+          );
+          setDeleteId(null);
+          return;
+        }
+      } catch (error) {
+        (addToast || showToast)('Erro ao verificar contratos financeiros do contato', 'error');
+        return;
+      }
+
       // First check if contact has deals
       try {
         const result = await checkHasDealsMutation.mutateAsync(deleteId);

@@ -242,6 +242,7 @@ export const queryKeys = {
         settings: () => [...base.all, 'settings'] as const,
         contracts: () => [...base.all, 'contracts'] as const,
         receivables: (period: string) => [...base.all, 'receivables', period] as const,
+        receivablesByContract: (contractId: string) => [...base.all, 'receivablesByContract', contractId] as const,
         expenses: () => [...base.all, 'expenses'] as const,
         entries: (period: string) => [...base.all, 'entries', period] as const,
         goals: () => [...base.all, 'goals'] as const,

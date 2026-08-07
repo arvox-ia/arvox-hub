@@ -77,6 +77,22 @@ export const useReceivables = (period: string, options?: { enabled?: boolean }) 
   });
 };
 
+/** Todos os recebíveis (não deletados) de um contrato específico, para o sheet de recebíveis. */
+export const useReceivablesByContract = (contractId: string | null, options?: { enabled?: boolean }) => {
+  const { user, loading: authLoading } = useAuth();
+  const externalEnabled = options?.enabled ?? true;
+
+  return useQuery<FinanceReceivable[]>({
+    queryKey: queryKeys.finance.receivablesByContract(contractId ?? ''),
+    queryFn: async () => {
+      const { data, error } = await financeService.listReceivablesByContract(contractId as string);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !authLoading && !!user && !!contractId && externalEnabled,
+  });
+};
+
 /** Despesas do catálogo (regras fixas + pontuais), não deletadas. */
 export const useExpenses = (options?: { enabled?: boolean }) => {
   const { user, loading: authLoading } = useAuth();
@@ -192,62 +208,121 @@ export const useUpdateContract = () => {
   });
 };
 
-/** Marca um recebível como pago. Otimista contra o cache do período informado. */
+/**
+ * Marca um recebível como pago. Otimista contra o cache do período
+ * informado; `contractId` é opcional (usado pelo sheet de recebíveis por
+ * contrato — Task 7) e, quando presente, também atualiza otimisticamente e
+ * invalida o cache `receivablesByContract`, já que esse cache não é
+ * escopado por período.
+ */
 export const useMarkReceivablePaid = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id }: { id: string; period: string }) => {
+    mutationFn: async ({ id }: { id: string; period: string; contractId?: string }) => {
       const { data, error } = await financeService.markReceivablePaid(id);
       if (error) throw error;
       return data!;
     },
-    onMutate: async ({ id, period }) => {
+    onMutate: async ({ id, period, contractId }) => {
       const queryKey = queryKeys.finance.receivables(period);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FinanceReceivable[]>(queryKey);
       queryClient.setQueryData<FinanceReceivable[]>(queryKey, (old = []) =>
         old.map(r => (r.id === id ? { ...r, status: 'PAID', paidAt: new Date().toISOString() } : r))
       );
-      return { previous, period };
+
+      let previousByContract: FinanceReceivable[] | undefined;
+      if (contractId) {
+        const byContractKey = queryKeys.finance.receivablesByContract(contractId);
+        await queryClient.cancelQueries({ queryKey: byContractKey });
+        previousByContract = queryClient.getQueryData<FinanceReceivable[]>(byContractKey);
+        queryClient.setQueryData<FinanceReceivable[]>(byContractKey, (old = []) =>
+          old.map(r => (r.id === id ? { ...r, status: 'PAID', paidAt: new Date().toISOString() } : r))
+        );
+      }
+
+      return { previous, period, contractId, previousByContract };
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.finance.receivables(context.period), context.previous);
       }
+      if (context?.contractId && context.previousByContract) {
+        queryClient.setQueryData(queryKeys.finance.receivablesByContract(context.contractId), context.previousByContract);
+      }
     },
-    onSettled: (_data, _error, { period }) => {
+    onSettled: (_data, _error, { period, contractId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivables(period) });
+      if (contractId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivablesByContract(contractId) });
+      }
     },
   });
 };
 
-/** Desfaz a baixa de um recebível. Otimista contra o cache do período informado. */
+/**
+ * Desfaz a baixa de um recebível. Otimista contra o cache do período
+ * informado; `contractId` opcional, mesmo racional de `useMarkReceivablePaid`.
+ */
 export const useUnmarkReceivablePaid = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id }: { id: string; period: string }) => {
+    mutationFn: async ({ id }: { id: string; period: string; contractId?: string }) => {
       const { data, error } = await financeService.unmarkReceivablePaid(id);
       if (error) throw error;
       return data!;
     },
-    onMutate: async ({ id, period }) => {
+    onMutate: async ({ id, period, contractId }) => {
       const queryKey = queryKeys.finance.receivables(period);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<FinanceReceivable[]>(queryKey);
       queryClient.setQueryData<FinanceReceivable[]>(queryKey, (old = []) =>
         old.map(r => (r.id === id ? { ...r, status: 'PENDING', paidAt: null } : r))
       );
-      return { previous, period };
+
+      let previousByContract: FinanceReceivable[] | undefined;
+      if (contractId) {
+        const byContractKey = queryKeys.finance.receivablesByContract(contractId);
+        await queryClient.cancelQueries({ queryKey: byContractKey });
+        previousByContract = queryClient.getQueryData<FinanceReceivable[]>(byContractKey);
+        queryClient.setQueryData<FinanceReceivable[]>(byContractKey, (old = []) =>
+          old.map(r => (r.id === id ? { ...r, status: 'PENDING', paidAt: null } : r))
+        );
+      }
+
+      return { previous, period, contractId, previousByContract };
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.finance.receivables(context.period), context.previous);
       }
+      if (context?.contractId && context.previousByContract) {
+        queryClient.setQueryData(queryKeys.finance.receivablesByContract(context.contractId), context.previousByContract);
+      }
     },
-    onSettled: (_data, _error, { period }) => {
+    onSettled: (_data, _error, { period, contractId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivables(period) });
+      if (contractId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.finance.receivablesByContract(contractId) });
+      }
+    },
+  });
+};
+
+/** Encerra um contrato e soft-deleta seus recebíveis PENDING futuros. */
+export const useEndContract = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, today }: { id: string; today: string }) => {
+      const { data, error } = await financeService.endContract(id, today);
+      if (error) throw error;
+      return data!;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
     },
   });
 };

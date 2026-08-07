@@ -1,9 +1,10 @@
 'use client';
 
 import React from 'react';
-import { LayoutDashboard, FileText, Receipt, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, Receipt, Settings as SettingsIcon } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ContractsTab } from './components/ContractsTab';
 import { useFinanceController, type FinanceTab } from './hooks/useFinanceController';
 
 const TAB_CONFIG: { id: FinanceTab; label: string }[] = [
@@ -14,7 +15,8 @@ const TAB_CONFIG: { id: FinanceTab; label: string }[] = [
 ];
 
 export const FinancePage: React.FC = () => {
-  const { activeTab, setActiveTab } = useFinanceController();
+  const controller = useFinanceController();
+  const { activeTab, setActiveTab } = controller;
 
   return (
     <div className="p-6 space-y-6">
@@ -45,11 +47,7 @@ export const FinancePage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="contracts">
-          <EmptyState
-            icon={FileText}
-            title="Contratos em construção"
-            description="Cadastro de contratos e recebíveis chega em breve."
-          />
+          <ContractsTab controller={controller} />
         </TabsContent>
 
         <TabsContent value="expenses">

@@ -673,6 +673,21 @@ export const useContactHasDeals = () => {
   });
 };
 
+/**
+ * Hook to check if contact has a linked finance contract (Fase 1B guard —
+ * `finance_contracts.contact_id` is ON DELETE RESTRICT). Mirrors
+ * `useContactHasDeals`.
+ */
+export const useContactHasFinanceContracts = () => {
+  return useMutation({
+    mutationFn: async (contactId: string) => {
+      const result = await contactsService.hasFinanceContracts(contactId);
+      if (result.error) throw result.error;
+      return { hasFinanceContracts: result.hasFinanceContracts, contractCount: result.contractCount };
+    },
+  });
+};
+
 // ============ COMPANIES MUTATIONS ============
 
 /**

@@ -29,6 +29,31 @@ async function getCurrentOrganizationId(): Promise<string | null> {
   return (profile as any)?.organization_id ?? null;
 }
 
+/**
+ * Traduz uma violação da FK `finance_contracts.contact_id` (ON DELETE
+ * RESTRICT, proposital — ver migration `20260807120000_finance_module.sql`
+ * e `financeService` em `lib/supabase/finance.ts`) numa mensagem pt-BR
+ * legível. Qualquer hard-delete de contato (via `delete`, `deleteWithDeals`
+ * ou o "zerar dados" de `DataStorageSettings`) quebra com essa violação se o
+ * contato tiver QUALQUER linha em `finance_contracts` — mesmo uma já
+ * soft-deletada/encerrada, já que `deleted_at` não afeta a FK. A checagem
+ * proativa (`hasFinanceContracts`, usada pela UI de contatos antes de
+ * confirmar a exclusão) cobre o caminho feliz; isto é a rede de segurança
+ * para quando ela não roda (RLS de finance_contracts é admin-only, então um
+ * usuário não-admin não enxerga a linha na checagem proativa) ou não é
+ * chamada (o "zerar dados" não passa por `contactsService.delete`).
+ * Se o erro não for essa violação específica, retorna-o inalterado.
+ */
+export function translateContactDeleteError(error: (Error & { code?: string }) | null): Error | null {
+  if (!error) return null;
+  const code = (error as { code?: string }).code;
+  const message = error.message || '';
+  if (code === '23503' && message.includes('finance_contracts')) {
+    return new Error('Este contato tem contrato financeiro vinculado. Encerre o contrato antes de excluir.');
+  }
+  return error;
+}
+
 // ============================================
 // CONTACTS SERVICE
 // ============================================
@@ -507,9 +532,44 @@ export const contactsService = {
         .delete()
         .eq('id', id);
 
-      return { error };
+      return { error: translateContactDeleteError(error as (Error & { code?: string }) | null) };
     } catch (e) {
       return { error: e as Error };
+    }
+  },
+
+  /**
+   * Verifica se o contato tem contrato financeiro vinculado (achado da
+   * revisão da Task 2 da Fase 1B: `finance_contracts.contact_id` é ON
+   * DELETE RESTRICT). Conta TODOS os contratos, inclusive soft-deletados
+   * (`status='ENDED'/'RENEWED'` ou `deleted_at` setado) — a FK bloqueia a
+   * exclusão do contato independente disso. Mesmo padrão de `hasDeals`.
+   *
+   * CAVEAT: `finance_contracts` tem RLS admin-only em todo verbo — um
+   * usuário não-admin sempre recebe `hasFinanceContracts: false` aqui,
+   * mesmo que o contrato exista (a linha é invisível pra ele, não
+   * inexistente). Esta checagem é só o caminho feliz da UX; o hard-delete
+   * em si continua protegido pela FK do Postgres e por
+   * `translateContactDeleteError` acima.
+   */
+  async hasFinanceContracts(contactId: string): Promise<{ hasFinanceContracts: boolean; contractCount: number; error: Error | null }> {
+    try {
+      if (!supabase) {
+        return {
+          hasFinanceContracts: false,
+          contractCount: 0,
+          error: new Error('Supabase não configurado'),
+        };
+      }
+      const { count, error } = await supabase
+        .from('finance_contracts')
+        .select('id', { count: 'exact', head: true })
+        .eq('contact_id', contactId);
+
+      if (error) return { hasFinanceContracts: false, contractCount: 0, error };
+      return { hasFinanceContracts: (count || 0) > 0, contractCount: count || 0, error: null };
+    } catch (e) {
+      return { hasFinanceContracts: false, contractCount: 0, error: e as Error };
     }
   },
 
@@ -567,7 +627,7 @@ export const contactsService = {
         .delete()
         .eq('id', contactId);
 
-      return { error: contactError };
+      return { error: translateContactDeleteError(contactError as (Error & { code?: string }) | null) };
     } catch (e) {
       return { error: e as Error };
     }

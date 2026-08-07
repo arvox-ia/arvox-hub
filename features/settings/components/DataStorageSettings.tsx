@@ -11,6 +11,7 @@ import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { supabase } from '@/lib/supabase';
+import { translateContactDeleteError } from '@/lib/supabase/contacts';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query';
 
@@ -135,8 +136,14 @@ export const DataStorageSettings: React.FC = () => {
             if (boardsError) throw boardsError;
 
             // 6. Contacts
+            // NOTA (Fase 1B): finance_contracts.contact_id é ON DELETE RESTRICT
+            // de propósito (registros financeiros não podem sumir junto do
+            // contato). Se algum contato tiver contrato financeiro vinculado
+            // (mesmo encerrado/soft-deletado), este delete falha com violação
+            // de FK — traduzimos pra uma mensagem legível em vez de deixar o
+            // erro cru do Postgres estourar no toast.
             const { error: contactsError } = await sb.from('contacts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-            if (contactsError) throw contactsError;
+            if (contactsError) throw translateContactDeleteError(contactsError as any) ?? contactsError;
 
             // 7. CRM Companies (empresas dos clientes, não a company do tenant!)
             const { error: crmCompaniesError } = await sb.from('crm_companies').delete().neq('id', '00000000-0000-0000-0000-000000000000');
