@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   User,
+  Wallet,
 } from 'lucide-react';
 
 export type ModuleId = 'crm' | 'finance' | 'projects';
@@ -56,7 +57,7 @@ export const PRIMARY_NAV: PrimaryNavItem[] = [
   { id: 'more', label: 'Mais', icon: MoreHorizontal },
 ];
 
-export type SecondaryNavId = 'dashboard' | 'reports' | 'settings' | 'profile';
+export type SecondaryNavId = 'dashboard' | 'reports' | 'finance' | 'settings' | 'profile';
 
 export interface SecondaryNavItem extends NavGate {
   id: SecondaryNavId;
@@ -69,6 +70,7 @@ export interface SecondaryNavItem extends NavGate {
 export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'dashboard', label: 'Visão Geral', href: '/dashboard', icon: LayoutDashboard },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
+  { id: 'finance', label: 'Financeiro', href: '/finance', icon: Wallet, module: 'finance', adminOnly: true },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

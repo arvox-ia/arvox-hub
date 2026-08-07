@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterNav, type NavGate } from '@/components/navigation/navConfig'
+import { filterNav, SECONDARY_NAV, type NavGate } from '@/components/navigation/navConfig'
 import { canAccessFinance } from '@/lib/authz'
 
 type Item = NavGate & { id: string }
@@ -38,5 +38,22 @@ describe('canAccessFinance', () => {
     expect(canAccessFinance({ role: 'vendedor', enabledModules: ['crm', 'finance'] })).toBe(false)
     expect(canAccessFinance({ role: 'admin', enabledModules: ['crm'] })).toBe(false)
     expect(canAccessFinance({ role: null, enabledModules: null })).toBe(false)
+  })
+})
+
+describe('SECONDARY_NAV real: item Financeiro', () => {
+  it('vendedor com finance habilitado NÃO recebe o item finance (adminOnly)', () => {
+    const out = filterNav(SECONDARY_NAV, { role: 'vendedor', enabledModules: ['crm', 'finance'] })
+    expect(out.map((i) => i.id)).not.toContain('finance')
+  })
+
+  it('admin com finance habilitado recebe o item finance', () => {
+    const out = filterNav(SECONDARY_NAV, { role: 'admin', enabledModules: ['crm', 'finance'] })
+    expect(out.map((i) => i.id)).toContain('finance')
+  })
+
+  it('admin sem o módulo finance habilitado NÃO recebe o item finance', () => {
+    const out = filterNav(SECONDARY_NAV, { role: 'admin', enabledModules: ['crm'] })
+    expect(out.map((i) => i.id)).not.toContain('finance')
   })
 })
