@@ -1,7 +1,15 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export type PublicApiAuthResult =
-  | { ok: true; organizationId: string; organizationName: string; apiKeyId: string; apiKeyPrefix: string }
+  | {
+      ok: true;
+      organizationId: string;
+      organizationName: string;
+      apiKeyId: string;
+      apiKeyPrefix: string;
+      scopes: string[];
+      createdBy: string | null;
+    }
   | { ok: false; status: number; body: { error: string; code?: string } };
 
 function getAnonSupabase() {
@@ -29,6 +37,8 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     api_key_prefix: string;
     organization_id: string;
     organization_name: string;
+    scopes?: unknown;
+    created_by?: unknown;
   };
 
   // Supabase RPC return types are not strongly typed here (no generated Database types),
@@ -47,12 +57,21 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     return { ok: false, status: 401, body: { error: 'Invalid API key', code: 'AUTH_INVALID' } };
   }
 
+  // scopes/created_by são colunas novas (migration 20260807140000); tratamos
+  // de forma defensiva para não quebrar contra um banco ainda não migrado.
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((s): s is string => typeof s === 'string')
+    : [];
+  const createdBy = typeof row.created_by === 'string' && row.created_by.trim() ? row.created_by : null;
+
   return {
     ok: true,
     apiKeyId: row.api_key_id,
     apiKeyPrefix: row.api_key_prefix,
     organizationId: row.organization_id,
     organizationName: row.organization_name,
+    scopes,
+    createdBy,
   };
 }
 

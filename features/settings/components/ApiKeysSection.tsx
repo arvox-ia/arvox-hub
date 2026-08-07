@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Key, Copy, ExternalLink, CheckCircle2, Plus, Trash2, ShieldCheck, RefreshCw, TerminalSquare, Play } from 'lucide-react';
+import { Key, Copy, ExternalLink, CheckCircle2, Plus, Trash2, ShieldCheck, RefreshCw, TerminalSquare, Play, Landmark } from 'lucide-react';
 
 import { ConfirmDialog as ConfirmModal } from '@/components/ui/confirm-dialog';
 import { useOptionalToast } from '@/context/ToastContext';
 import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
 import { supabase } from '@/lib/supabase/client';
+import { useViewer } from '@/hooks/useViewer';
 
 import { SettingsSection } from './SettingsSection';
 
@@ -15,6 +16,7 @@ type ApiKeyRow = {
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  scopes: string[] | null;
 };
 
 /**
@@ -24,6 +26,8 @@ type ApiKeyRow = {
 export const ApiKeysSection: React.FC = () => {
   const { addToast } = useOptionalToast();
   const { data: boardsFromContext = [] } = useBoards();
+  const viewer = useViewer();
+  const isAdmin = viewer.role === 'admin';
 
   const [action, setAction] = useState<'create_lead' | 'create_deal' | 'move_stage' | 'create_activity'>('create_lead');
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
@@ -34,8 +38,10 @@ export const ApiKeysSection: React.FC = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ApiKeyRow | null>(null);
   const [newKeyName, setNewKeyName] = useState('n8n');
+  const [wantsFinanceScope, setWantsFinanceScope] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdPrefix, setCreatedPrefix] = useState<string | null>(null);
+  const [createdScopes, setCreatedScopes] = useState<string[]>(['crm']);
   const [apiKeyToken, setApiKeyToken] = useState<string>(''); // token completo (apenas em memória)
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -81,7 +87,7 @@ export const ApiKeysSection: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('api_keys')
-        .select('id,name,key_prefix,created_at,last_used_at,revoked_at')
+        .select('id,name,key_prefix,created_at,last_used_at,revoked_at,scopes')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setKeys((data || []) as ApiKeyRow[]);
@@ -102,12 +108,16 @@ export const ApiKeysSection: React.FC = () => {
       return;
     }
     const name = newKeyName.trim() || 'Integração';
+    // Defesa em profundidade no cliente: mesmo que o checkbox só apareça pra
+    // admin, o valor definitivo é validado de novo no servidor (create_api_key
+    // RPC exige admin pra criar QUALQUER chave e sanea os escopos recebidos).
+    const scopes = isAdmin && wantsFinanceScope ? ['crm', 'finance'] : ['crm'];
     setCreating(true);
     setCreatedToken(null);
     setCreatedPrefix(null);
     setTestResult(null);
     try {
-      const { data, error } = await supabase.rpc('create_api_key', { p_name: name });
+      const { data, error } = await supabase.rpc('create_api_key', { p_name: name, p_scopes: scopes });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       const token = row?.token as string | undefined;
@@ -115,7 +125,9 @@ export const ApiKeysSection: React.FC = () => {
       if (!token || !prefix) throw new Error('Resposta inválida ao criar chave');
       setCreatedToken(token);
       setCreatedPrefix(prefix);
+      setCreatedScopes(scopes);
       setApiKeyToken(token);
+      setWantsFinanceScope(false);
       addToast('Chave criada. Copie agora — ela aparece só uma vez.', 'success');
       await loadKeys();
     } catch (e: any) {
@@ -447,6 +459,29 @@ export const ApiKeysSection: React.FC = () => {
             </button>
           </div>
 
+          {isAdmin && (
+            <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-3">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={wantsFinanceScope}
+                  onChange={(e) => setWantsFinanceScope(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-300 dark:border-amber-500/40 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-xs text-amber-900 dark:text-amber-200">
+                  <span className="font-semibold inline-flex items-center gap-1">
+                    <Landmark className="h-3.5 w-3.5" />
+                    Acesso ao módulo financeiro
+                  </span>
+                  <br />
+                  Esta chave poderá <span className="font-semibold">ler e escrever dados financeiros</span> da
+                  organização (contratos, recebíveis, despesas). Marque apenas para integrações que realmente
+                  precisam disso.
+                </span>
+              </label>
+            </div>
+          )}
+
           {createdToken && (
             <div className="mt-3 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 p-3">
               <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 mb-2 flex items-center gap-2">
@@ -470,6 +505,7 @@ export const ApiKeysSection: React.FC = () => {
               </div>
               <div className="mt-2 text-xs text-emerald-700/80 dark:text-emerald-200/80">
                 Prefixo: <span className="font-mono">{createdPrefix}</span>
+                {' · '}Escopos: <span className="font-mono">{createdScopes.join(', ')}</span>
               </div>
             </div>
           )}
@@ -851,7 +887,22 @@ export const ApiKeysSection: React.FC = () => {
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
                       {k.key_prefix}…
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {(k.scopes && k.scopes.length > 0 ? k.scopes : ['crm']).map((scope) => (
+                        <span
+                          key={scope}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                            scope === 'finance'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300'
+                          }`}
+                        >
+                          {scope === 'finance' && <Landmark className="h-3 w-3" />}
+                          {scope}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
                       Último uso: {k.last_used_at ? new Date(k.last_used_at).toLocaleString('pt-BR') : '—'}
                     </div>
                   </div>
