@@ -29,6 +29,7 @@ const COLORS = {
     bgLight: [248, 250, 252] as [number, number, number],
     border: [226, 232, 240] as [number, number, number],
     white: [255, 255, 255] as [number, number, number],
+    brand: [209, 4, 25] as [number, number, number], // vermelho Arvox #D10419
 };
 
 /**
@@ -74,13 +75,13 @@ export const generateReportPDF = async (data: ReportData, period: PeriodFilter, 
     // HEADER
     // ============================================
 
-    // Logo placeholder (N for NossoCRM)
-    doc.setFillColor(...COLORS.blue);
+    // Marca Arvox no cabeçalho
+    doc.setFillColor(...COLORS.brand);
     doc.roundedRect(margin, 12, 12, 12, 2, 2, 'F');
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
-    doc.text('N', margin + 4.5, 20);
+    doc.text('A', margin + 4.5, 20);
 
     // Title
     doc.setFontSize(20);

@@ -2,7 +2,7 @@
 // Minimal Service Worker (MVP): cache app shell assets for faster launch.
 // Note: This does NOT provide offline data sync.
 
-const CACHE_NAME = 'nossocrm-shell-v2';
+const CACHE_NAME = 'arvox-hub-shell-v3';
 const SHELL_URLS = [
   '/',
   '/login',
