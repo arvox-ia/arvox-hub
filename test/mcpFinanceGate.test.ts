@@ -15,7 +15,7 @@
  * query roda até o `execute` de uma tool ser chamado, o que este teste nunca
  * faz.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // `registerExistingCrmTools`/`registerFinanceTools` constroem tools "de
 // schema" na hora do registro chamando `createCRMTools`/`createFinanceTools`,
@@ -55,6 +55,19 @@ const BASE_CTX = {
 } as const;
 
 describe('registerAllMcpTools — gate do financeiro', () => {
+  // Este arquivo testa o gate de ESCOPO/PAPEL/MÓDULO (keyGrantsFinance), não
+  // o gate de SEGREDO do confirmationToken (isso é `mcpFinanceConfirmGate.test.ts`)
+  // — fixamos um segredo aqui pra "todas as tools financeiras aparecem" não
+  // depender de o ambiente ter (ou não) `INTERNAL_API_SECRET` configurado.
+  const ORIGINAL_SECRET = process.env.INTERNAL_API_SECRET;
+  beforeEach(() => {
+    process.env.INTERNAL_API_SECRET = 'segredo-de-teste-nao-usar-em-producao';
+  });
+  afterEach(() => {
+    if (ORIGINAL_SECRET === undefined) delete process.env.INTERNAL_API_SECRET;
+    else process.env.INTERNAL_API_SECRET = ORIGINAL_SECRET;
+  });
+
   it('caso feliz: escopo finance + criador admin + módulo ligado → todas as tools financeiras aparecem', () => {
     const { server, registered } = fakeServer();
     const ctx: McpRequestContext = {

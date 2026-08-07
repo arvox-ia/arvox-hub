@@ -20,12 +20,17 @@
  *    que usa client anon+RLS; inutilizável no client service-role do MCP,
  *    que precisa de escopo de org MANUAL). É só uma consulta filtrada, sem
  *    regra de negócio a duplicar.
+ *
+ * Hardening pós-revisão: os 3 `*.confirm` (escrita de fato) só são
+ * registrados quando `INTERNAL_API_SECRET` está configurado — ver
+ * `registerFinanceAiTools` abaixo.
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { getMcpContext } from '@/lib/mcp/context';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
 import { createFinanceTools } from '@/lib/ai/financeTools';
+import { hasConfirmationTokenSecret } from '@/lib/ai/financeToolsSummaries';
 import { formatBRL } from '@/lib/utils/currency';
 import { FINANCE_TOOL_CATALOG } from '@/lib/mcp/financeToolCatalog';
 
@@ -50,12 +55,42 @@ function err(message: string) {
   };
 }
 
+/**
+ * Chaves internas dos 3 `confirm*` (as tools que de fato ESCREVEM). Skipadas
+ * do registro MCP quando `INTERNAL_API_SECRET` está ausente — ver
+ * `registerFinanceAiTools`.
+ */
+const CONFIRM_TOOL_INTERNAL_KEYS = new Set([
+  'confirmCreateExpense',
+  'confirmMarkReceivablePaid',
+  'confirmSetMonthlyGoal',
+]);
+
+/** Evita spammar o log a cada requisição enquanto o segredo não é configurado. */
+let warnedMissingSecretOnce = false;
+
 export function registerFinanceTools(server: McpServer) {
   registerFinanceAiTools(server);
   registerContractsListTool(server);
 }
 
-/** Registra os 9 tools de `createFinanceTools` (3 leituras + 3 pares prepare/confirm). */
+/**
+ * Registra os tools de `createFinanceTools`: sempre as 3 leituras + os 3
+ * `prepare*` (não escrevem nada, só montam um resumo + `confirmationToken`).
+ *
+ * Os 3 `confirm*` (escrita de fato) só são registrados se
+ * `INTERNAL_API_SECRET` estiver configurado. Motivo (achado da revisão):
+ * sem o segredo, `computeConfirmationToken` (`lib/ai/financeToolsSummaries.ts`)
+ * cai para SHA-256 sem segredo — DETERMINÍSTICO e computável por qualquer um
+ * que leia o código-fonte (público neste repo). No chat da Hub isso já era
+ * tolerado (o único "cliente" é o próprio app, atrás de auth de sessão); no
+ * MCP o caller é QUALQUER client HTTP segurando uma API key — um cliente
+ * malicioso ou comprometido poderia computar um `confirmationToken` válido
+ * SEM nunca ter chamado o `prepare*` correspondente, pulando a etapa de
+ * "mostrar o resumo pro humano confirmar". Fail closed: sem segredo, as
+ * leituras e os `prepare*` continuam úteis (só param no passo de escrita);
+ * os `confirm*` simplesmente não existem no `tools/list`.
+ */
 function registerFinanceAiTools(server: McpServer) {
   // Instância "de schema": mesmo truque de `registerExistingCrmTools` — cria as
   // tools com um contexto fake só para extrair `inputSchema`/`execute` na hora
@@ -63,8 +98,21 @@ function registerFinanceAiTools(server: McpServer) {
   // com o contexto REAL da requisição — ver abaixo).
   const dummyTools = createFinanceTools({ organizationId: '__schema__' }, '__schema__') as Record<string, AnyTool>;
 
+  const secretConfigured = hasConfirmationTokenSecret();
+  if (!secretConfigured && !warnedMissingSecretOnce) {
+    warnedMissingSecretOnce = true;
+    console.error(
+      '[mcp/finance] INTERNAL_API_SECRET não configurado — as tools de escrita financeira ' +
+        '(finance.expense.confirm, finance.receivable.markPaid.confirm, finance.goal.set.confirm) ' +
+        'NÃO serão registradas no servidor MCP (o confirmationToken cairia para SHA-256 sem segredo, ' +
+        'forjável por qualquer client HTTP que tenha a API key, sem passar pelo prepare*). ' +
+        'Leituras e prepare* continuam disponíveis. Configure INTERNAL_API_SECRET para habilitar escrita via MCP.'
+    );
+  }
+
   for (const [internalKey, t] of Object.entries(dummyTools)) {
     if (!t?.execute) continue;
+    if (!secretConfigured && CONFIRM_TOOL_INTERNAL_KEYS.has(internalKey)) continue;
 
     const catalog = (FINANCE_TOOL_CATALOG as Record<string, { name: string; title: string; description: string }>)[
       internalKey

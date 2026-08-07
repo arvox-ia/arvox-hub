@@ -147,6 +147,19 @@ function getTokenSecret(): string | null {
 }
 
 /**
+ * Expõe SÓ a presença do segredo (nunca o valor) para callers que precisam
+ * decidir se é seguro expor escrita sem revalidação adicional — hoje usado
+ * por `lib/mcp/tools/finance.ts` para NÃO registrar os `*.confirm` no MCP
+ * quando o segredo está ausente (sobre HTTP, qualquer client com a API key
+ * poderia forjar um `confirmationToken` SHA-256 sem segredo e pular o
+ * `prepare*` — no chat da Hub isso era tolerável, no MCP não é). Lida a cada
+ * chamada (sem cache), mesmo racional de `getTokenSecret`.
+ */
+export function hasConfirmationTokenSecret(): boolean {
+  return getTokenSecret() !== null;
+}
+
+/**
  * Token de confirmação — `prepare*` devolve, o `confirm*` correspondente
  * reexige o MESMO payload + token. Se qualquer campo mudar entre o `prepare`
  * e o `confirm` — o modelo "lembrou errado", ou tentou pular o prepare

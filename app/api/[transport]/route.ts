@@ -84,6 +84,14 @@ const mcpHandler = createMcpHandler(
     basePath: '/api',
     maxDuration: 120,
     verboseLogs: process.env.NODE_ENV === 'development',
+    // Achado da revisão: o transporte SSE legado do mcp-handler regista as
+    // tools UMA VEZ POR CONEXÃO (não por requisição) — uma chave revogada ou
+    // rebaixada de admin continua com as tools financeiras registradas até a
+    // conexão SSE cair (gap de frescor que não existe no Streamable HTTP,
+    // onde cada POST cria um McpServer novo — ver `registerAllMcpTools`).
+    // Claude Desktop usa Streamable HTTP; desativa o SSE para tirar esse
+    // caminho do modelo de ameaça em vez de só "não usá-lo".
+    disableSse: true,
   }
 );
 
@@ -93,7 +101,14 @@ const authWrappedHandler = withMcpAuth(
     const token = bearerToken ?? extractBearerToken(req);
     if (!token) return undefined;
 
-    const ctx = await resolveApiKey(token);
+    // Evita resolver a chave duas vezes por requisição (achado da revisão):
+    // `wrappedHandler`, abaixo, já resolveu a chave e guardou o contexto em
+    // `mcpContextStorage.run(ctx, ...)` ANTES de chamar este handler — lemos
+    // daqui em vez de bater no Supabase de novo. `getStore()` só existe
+    // dentro do `run()` de uma requisição em andamento (nunca cacheado entre
+    // requisições); o fallback cobre só o caso defensivo de este handler ser
+    // invocado fora desse `run()` (não deveria acontecer no fluxo normal).
+    const ctx = mcpContextStorage.getStore() ?? (await resolveApiKey(token));
     if (!ctx) return undefined;
 
     // Return a minimal AuthInfo-compatible object. The real context is stored
