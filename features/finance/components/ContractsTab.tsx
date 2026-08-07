@@ -36,7 +36,6 @@ interface ContractsTabProps {
     | 'requestEndContract'
     | 'cancelEndContract'
     | 'confirmEndContract'
-    | 'isEndingContract'
     | 'receivablesContractId'
     | 'openReceivablesSheet'
     | 'closeReceivablesSheet'
@@ -75,7 +74,6 @@ export const ContractsTab: React.FC<ContractsTabProps> = ({ controller }) => {
     requestEndContract,
     cancelEndContract,
     confirmEndContract,
-    isEndingContract,
     receivablesContractId,
     openReceivablesSheet,
     closeReceivablesSheet,
@@ -229,7 +227,6 @@ export const ContractsTab: React.FC<ContractsTabProps> = ({ controller }) => {
           <>
             O contrato ficará com status <strong>Encerrado</strong> e os recebíveis pendentes ainda não vencidos
             serão removidos. Recebíveis já pagos ou já vencidos não são afetados.
-            {isEndingContract && ' Encerrando...'}
           </>
         }
         confirmText="Encerrar"

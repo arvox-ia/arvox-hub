@@ -7,9 +7,13 @@ import { InputField, SelectField, TextareaField, SubmitButton } from '@/componen
 import { ContactSearchCombobox } from '@/components/ui/ContactSearchCombobox';
 import { useToast } from '@/context/ToastContext';
 import { formatBRL } from '@/lib/utils/currency';
+import { collidesWithPreviousContract } from '../core/contractStatus';
 import type { Contact } from '@/types';
 import type { ContractFormState, ContractFormValues } from '../hooks/useFinanceController';
 import type { ReceivableEntry } from '../core/types';
+
+const COLLISION_MESSAGE =
+  'A data de início gera uma cobrança na mesma data da última do contrato anterior — ajuste o início ou o dia de cobrança.';
 
 interface ContractFormModalProps {
   state: ContractFormState;
@@ -118,6 +122,13 @@ export const ContractFormModal: React.FC<ContractFormModalProps> = ({
     return { count: preview.length, setupCount, monthlyCount, total };
   }, [preview]);
 
+  // Aviso ao vivo (não-bloqueante por si só — quem bloqueia de verdade é o
+  // controller no submit, já que o usuário pode editar qualquer campo
+  // depois do prefill): a data de início efetiva colide com a última
+  // cobrança do contrato anterior? Só se aplica no modo renew.
+  const hasCollision =
+    state.mode === 'renew' && !!preview && collidesWithPreviousContract(preview, state.previousLastDueDate);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -136,6 +147,10 @@ export const ContractFormModal: React.FC<ContractFormModalProps> = ({
     }
     if (!values.startDate) {
       setFormError('Informe a data de início.');
+      return;
+    }
+    if (hasCollision) {
+      setFormError(COLLISION_MESSAGE);
       return;
     }
 
@@ -270,13 +285,19 @@ export const ContractFormModal: React.FC<ContractFormModalProps> = ({
           </div>
         )}
 
+        {hasCollision && !formError && (
+          <p className="text-sm text-red-500 flex items-start gap-1.5" role="alert">
+            <span aria-hidden="true">⚠</span> {COLLISION_MESSAGE}
+          </p>
+        )}
+
         {formError && (
           <p className="text-sm text-red-500" role="alert">
             {formError}
           </p>
         )}
 
-        <SubmitButton isLoading={isSaving} loadingText="Salvando...">
+        <SubmitButton isLoading={isSaving} loadingText="Salvando..." disabled={hasCollision}>
           {state.mode === 'edit' ? 'Salvar alterações' : state.mode === 'renew' ? 'Criar renovação' : 'Criar contrato'}
         </SubmitButton>
       </ModalForm>

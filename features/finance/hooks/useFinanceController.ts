@@ -35,7 +35,13 @@ import {
 } from '@/lib/query/hooks/useFinanceQuery';
 import { generateReceivables } from '../core/receivables';
 import { generateFixedExpenseEntries, sumByCategory } from '../core/expenses';
-import { computeContractEndDate, computeRenewalStartDate, isEndingSoon } from '../core/contractStatus';
+import {
+  collidesWithPreviousContract,
+  computeContractEndDate,
+  computeRenewalStartDate,
+  isEndingSoon,
+  lastReceivableDueDate,
+} from '../core/contractStatus';
 import { buildContractsCsvRows, buildExpensesCsvRows, buildReceivablesCsvRows } from '../core/csvExport';
 import type { ContractInput, ReceivableEntry } from '../core/types';
 import {
@@ -79,7 +85,18 @@ export interface ContractFormValues {
 export type ContractFormState =
   | { mode: 'create' }
   | { mode: 'edit'; contract: FinanceContract }
-  | { mode: 'renew'; previousContract: FinanceContract; initialValues: ContractFormValues };
+  | {
+      mode: 'renew';
+      previousContract: FinanceContract;
+      /**
+       * Due date do recebível mais tardio (qualquer kind) do contrato
+       * anterior — âncora do guard anti-duplicidade em `submitCreateContract`
+       * (`collidesWithPreviousContract`). `null` só quando o anterior não
+       * gerou recebível nenhum (edge case: setup+mensalidade ambos zerados).
+       */
+      previousLastDueDate: string | null;
+      initialValues: ContractFormValues;
+    };
 
 /** Uma linha da lista de contratos, com dados já derivados para a UI. */
 export interface ContractRow {
@@ -165,10 +182,28 @@ export function useFinanceController() {
    * "renovado" órfão se o usuário cancelar o modal.
    */
   const openRenewContract = (contract: FinanceContract) => {
-    const previousEndDate = computeContractEndDate(contract.startDate, contract.durationMonths);
+    // Regenera os recebíveis do contrato anterior com os MESMOS dados dele
+    // (não uma fórmula de calendário paralela — essa era a causa do bug de
+    // dupla cobrança) pra achar o due date REAL mais tardio, âncora de tudo
+    // que segue: prefill do início da renovação e o guard de colisão no
+    // submit.
+    const previousReceivables = generateReceivables(
+      {
+        setupValue: contract.setupValue,
+        setupInstallments: contract.setupInstallments,
+        monthlyValue: contract.monthlyValue,
+        startDate: contract.startDate,
+        durationMonths: contract.durationMonths,
+        billingDay: contract.billingDay,
+      },
+      { horizonMonths, today }
+    );
+    const previousLastDueDate = lastReceivableDueDate(previousReceivables);
+
     setContractFormState({
       mode: 'renew',
       previousContract: contract,
+      previousLastDueDate,
       initialValues: {
         contactId: contract.contactId,
         description: contract.description,
@@ -177,7 +212,7 @@ export function useFinanceController() {
         setupValue: 0,
         setupInstallments: 1,
         monthlyValue: contract.monthlyValue,
-        startDate: previousEndDate ? computeRenewalStartDate(previousEndDate) : today,
+        startDate: previousLastDueDate ? computeRenewalStartDate(previousLastDueDate) : today,
         durationMonths: contract.durationMonths,
         billingDay: contract.billingDay,
       },
@@ -207,6 +242,19 @@ export function useFinanceController() {
     if (!state || state.mode === 'edit') return;
 
     const receivables = previewReceivables(values);
+
+    // Belt and braces (achado da revisão): o prefill de `openRenewContract`
+    // já evita colisão no caminho feliz, mas o usuário pode editar contato,
+    // data de início, dia de cobrança etc. livremente antes de salvar — o
+    // guard tem que rodar de novo aqui, no submit, com os valores EFETIVOS.
+    if (state.mode === 'renew' && collidesWithPreviousContract(receivables, state.previousLastDueDate)) {
+      addToast(
+        'A data de início gera uma cobrança na mesma data da última do contrato anterior — ajuste o início ou o dia de cobrança.',
+        'error'
+      );
+      return;
+    }
+
     const contractInput: NewFinanceContractInput = {
       contactId: values.contactId,
       description: values.description,
@@ -315,7 +363,26 @@ export function useFinanceController() {
   const contractRows: ContractRow[] = useMemo(
     () =>
       contracts.map(contract => {
-        const endDate = computeContractEndDate(contract.startDate, contract.durationMonths);
+        // Fim de vigência derivado dos recebíveis REAIS (mesma função,
+        // mesmos dados do contrato) — nunca uma fórmula de calendário
+        // paralela, pra "vence em Xd" e a coluna de vigência nunca
+        // discordarem do que `generateReceivables` realmente gera (e do que
+        // a renovação usa como âncora).
+        const receivables =
+          contract.durationMonths === null
+            ? []
+            : generateReceivables(
+                {
+                  setupValue: contract.setupValue,
+                  setupInstallments: contract.setupInstallments,
+                  monthlyValue: contract.monthlyValue,
+                  startDate: contract.startDate,
+                  durationMonths: contract.durationMonths,
+                  billingDay: contract.billingDay,
+                },
+                { horizonMonths, today }
+              );
+        const endDate = computeContractEndDate(contract.startDate, contract.durationMonths, receivables);
         return {
           contract,
           contactName: contactsById.get(contract.contactId)?.name ?? null,
@@ -324,7 +391,7 @@ export function useFinanceController() {
           canRenew: contract.durationMonths !== null,
         };
       }),
-    [contracts, contactsById, today]
+    [contracts, contactsById, today, horizonMonths]
   );
 
   const contractsById = useMemo(() => new Map(contracts.map(c => [c.id, c])), [contracts]);
@@ -452,12 +519,22 @@ export function useFinanceController() {
     }
   };
 
-  const toggleEntryPaid = async (entryId: string, currentlyPaid: boolean) => {
+  /**
+   * Período derivado do PRÓPRIO `dueDate` do lançamento (não de `expensesPeriod`,
+   * a aba Despesas pode estar em outro mês) — mesmo racional de
+   * `toggleReceivablePaid`. Sem isso, dar baixa a partir do Dashboard (Task 9,
+   * cujos lançamentos podem cair em qualquer mês) atualizaria o cache
+   * otimista do período ERRADO; a invalidação de `allEntries` no `onSettled`
+   * da mutation corrige o estado de qualquer forma, mas o otimismo em si
+   * ficaria mirando o mês errado sem este parâmetro.
+   */
+  const toggleEntryPaid = async (entryId: string, dueDate: string, currentlyPaid: boolean) => {
+    const period = dueDate.slice(0, 7);
     try {
       if (currentlyPaid) {
-        await unmarkEntryPaidMutation.mutateAsync({ id: entryId, period: expensesPeriod });
+        await unmarkEntryPaidMutation.mutateAsync({ id: entryId, period });
       } else {
-        await markEntryPaidMutation.mutateAsync({ id: entryId, period: expensesPeriod });
+        await markEntryPaidMutation.mutateAsync({ id: entryId, period });
       }
     } catch (error) {
       addToast(`Erro ao atualizar baixa do lançamento: ${(error as Error).message}`, 'error');
