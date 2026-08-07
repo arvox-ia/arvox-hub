@@ -253,3 +253,26 @@ export {
 } from './useOrgSettingsQuery';
 
 // =============================================================================
+// FINANCE MODULE
+// =============================================================================
+
+export {
+  useFinanceSettings,
+  useContracts,
+  useReceivables,
+  useExpenses,
+  useExpenseEntries,
+  useGoals,
+  useOpenDealsForProjection,
+  useCreateContract,
+  useUpdateContract,
+  useMarkReceivablePaid,
+  useUnmarkReceivablePaid,
+  useCreateExpense,
+  useUpdateExpense,
+  useMarkEntryPaid,
+  useUpsertGoal,
+  useUpsertFinanceSettings,
+} from './useFinanceQuery';
+
+// =============================================================================

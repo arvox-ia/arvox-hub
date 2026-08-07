@@ -229,6 +229,24 @@ export const queryKeys = {
         /** Enabled modules (organization_settings.enabled_modules) for a given org. */
         enabledModules: (orgId: string) => [...base.all, 'enabledModules', orgId] as const,
     })),
+
+    // =========================================================================
+    // FINANCE MODULE (Fase 1B)
+    // =========================================================================
+
+    /**
+     * Finance module query keys. `receivables`/`entries` são escopadas por
+     * período (`yyyy-MM`) — cada mês é uma entrada de cache independente.
+     */
+    finance: createExtendedQueryKeys('finance', base => ({
+        settings: () => [...base.all, 'settings'] as const,
+        contracts: () => [...base.all, 'contracts'] as const,
+        receivables: (period: string) => [...base.all, 'receivables', period] as const,
+        expenses: () => [...base.all, 'expenses'] as const,
+        entries: (period: string) => [...base.all, 'entries', period] as const,
+        goals: () => [...base.all, 'goals'] as const,
+        openDeals: () => [...base.all, 'openDeals'] as const,
+    })),
 };
 
 /**
