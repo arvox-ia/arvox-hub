@@ -1,20 +1,25 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ServerCog, Copy, CheckCircle2, Play, AlertTriangle, RefreshCw, ChevronDown } from 'lucide-react';
+import { ServerCog, Copy, CheckCircle2, Play, AlertTriangle, RefreshCw, ChevronDown, Landmark } from 'lucide-react';
 import { useOptionalToast } from '@/context/ToastContext';
 import { supabase } from '@/lib/supabase/client';
+import { useViewer } from '@/hooks/useViewer';
 import { SettingsSection } from './SettingsSection';
 
 /**
  * Seção de configurações para MCP (Model Context Protocol).
- * Expõe o CRM como MCP Server via `/api/mcp`.
+ * Expõe o CRM (e, para chaves com escopo financeiro, o financeiro) como MCP
+ * Server via `/api/mcp`.
  */
 export const McpSection: React.FC = () => {
   const { addToast } = useOptionalToast();
+  const viewer = useViewer();
+  const isAdmin = viewer.role === 'admin';
 
   const endpointPath = '/api/mcp';
   const protocolVersion = '2025-11-25';
 
   const [apiKey, setApiKey] = useState('');
+  const [wantsFinanceScope, setWantsFinanceScope] = useState(false);
   const [creatingKey, setCreatingKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -58,7 +63,11 @@ export const McpSection: React.FC = () => {
     setCreatingKey(true);
     try {
       const name = `MCP ${new Date().toLocaleDateString('pt-BR')}`;
-      const { data, error } = await supabase.rpc('create_api_key', { p_name: name });
+      // Defesa em profundidade no cliente: mesmo que o checkbox só apareça pra
+      // admin, o valor definitivo é validado de novo no servidor (create_api_key
+      // RPC exige admin pra gravar 'finance' em QUALQUER chave — ver ApiKeysSection).
+      const scopes = isAdmin && wantsFinanceScope ? ['crm', 'finance'] : ['crm'];
+      const { data, error } = await supabase.rpc('create_api_key', { p_name: name, p_scopes: scopes });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       const token = row?.token as string | undefined;
@@ -66,7 +75,12 @@ export const McpSection: React.FC = () => {
 
       setApiKey(token);
       setTestResult(null);
-      addToast('API key criada e preenchida. (Ela aparece só uma vez.)', 'success');
+      addToast(
+        scopes.includes('finance')
+          ? 'API key criada com acesso ao financeiro e preenchida. (Ela aparece só uma vez.)'
+          : 'API key criada e preenchida. (Ela aparece só uma vez.)',
+        'success'
+      );
 
       // UX: leva o foco pro campo do Passo 2.
       setTimeout(() => apiKeyInputRef.current?.focus(), 0);
@@ -259,6 +273,29 @@ export const McpSection: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {isAdmin && !testResult?.ok && (
+            <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-3">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={wantsFinanceScope}
+                  onChange={(e) => setWantsFinanceScope(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-300 dark:border-amber-500/40 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-xs text-amber-900 dark:text-amber-200">
+                  <span className="font-semibold inline-flex items-center gap-1">
+                    <Landmark className="h-3.5 w-3.5" />
+                    Acesso ao módulo financeiro
+                  </span>
+                  <br />
+                  A chave gerada pelo botão "Conectar" poderá{' '}
+                  <span className="font-semibold">ler e escrever dados financeiros</span> da organização (contratos,
+                  recebíveis, despesas). Marque apenas se for usar o assistente para o financeiro.
+                </span>
+              </label>
+            </div>
+          )}
 
           {testResult?.ok && (
             <div className="mt-4 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 p-4">
