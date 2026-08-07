@@ -70,6 +70,34 @@ describe('generateReceivables — SETUP', () => {
     expect(out.some((e) => e.kind === 'SETUP')).toBe(false)
     expect(out.every((e) => e.kind === 'MONTHLY')).toBe(true)
   })
+
+  it('arredonda corretamente um valor no limite do meio-centavo (35.855 → 35.86, não 35.85)', () => {
+    // O double do literal 35.855 é armazenado como 35.854999999999996874...,
+    // então um Math.round(value*100) ingênuo arredondaria para baixo.
+    const contract = makeContract({ setupValue: 35.855, setupInstallments: 1, startDate: '2026-01-05' })
+    const out = generateReceivables(contract, { horizonMonths: 12, today: '2026-01-01' })
+    const setup = out.filter((e) => e.kind === 'SETUP')
+
+    expect(setup.map((e) => e.amount)).toEqual([35.86])
+  })
+
+  it('divide setup de R$1000 em 7 parcelas: soma exata em centavos, sem drift de doubles', () => {
+    const contract = makeContract({ setupValue: 1000, setupInstallments: 7, startDate: '2026-01-05' })
+    const out = generateReceivables(contract, { horizonMonths: 12, today: '2026-01-01' })
+    const setup = out.filter((e) => e.kind === 'SETUP')
+
+    expect(setup.map((e) => e.amount)).toEqual([142.86, 142.86, 142.86, 142.86, 142.86, 142.86, 142.84])
+    expect(setup.reduce((sum, e) => sum + e.amount, 0)).toBeCloseTo(1000, 2)
+  })
+
+  it('divide setup de R$0,10 em 3 parcelas: soma exata em centavos', () => {
+    const contract = makeContract({ setupValue: 0.1, setupInstallments: 3, startDate: '2026-01-05' })
+    const out = generateReceivables(contract, { horizonMonths: 12, today: '2026-01-01' })
+    const setup = out.filter((e) => e.kind === 'SETUP')
+
+    expect(setup.map((e) => e.amount)).toEqual([0.03, 0.03, 0.04])
+    expect(setup.reduce((sum, e) => sum + e.amount, 0)).toBeCloseTo(0.1, 2)
+  })
 })
 
 describe('generateReceivables — MONTHLY', () => {
@@ -179,7 +207,7 @@ describe('generateReceivables — MONTHLY', () => {
 })
 
 describe('generateReceivables — combinação setup + mensal', () => {
-  it('contrato com setup e mensalidade gera as duas séries juntas', () => {
+  it('contrato com setup e mensalidade gera as duas séries juntas, com datas e valores corretos', () => {
     const contract = makeContract({
       setupValue: 1000,
       setupInstallments: 2,
@@ -190,8 +218,11 @@ describe('generateReceivables — combinação setup + mensal', () => {
     })
     const out = generateReceivables(contract, { horizonMonths: 12, today: '2026-01-01' })
 
-    expect(out).toHaveLength(4)
-    expect(out.filter((e) => e.kind === 'SETUP')).toHaveLength(2)
-    expect(out.filter((e) => e.kind === 'MONTHLY')).toHaveLength(2)
+    expect(out).toEqual([
+      { kind: 'SETUP', amount: 500, dueDate: '2026-01-01', description: 'Setup 1/2' },
+      { kind: 'SETUP', amount: 500, dueDate: '2026-02-01', description: 'Setup 2/2' },
+      { kind: 'MONTHLY', amount: 500, dueDate: '2026-01-15', description: 'Mensalidade' },
+      { kind: 'MONTHLY', amount: 500, dueDate: '2026-02-15', description: 'Mensalidade' },
+    ])
   })
 })

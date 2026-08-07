@@ -10,6 +10,13 @@ import type { ContractInput, GenerateReceivablesOptions, ReceivableEntry } from 
  * dia em fusos negativos). Internamente, string parsing é feito por split
  * puro (sem `Date`); o único uso de `Date`/date-fns é dentro de `clampDay`,
  * com data local sem ambiguidade (`new Date(year, monthIndex0, day)`).
+ *
+ * Atenção consumidores: os valores monetários retornados já vêm
+ * arredondados ao centavo, mas são `number` (double). Ao SOMAR muitos
+ * deles, o resultado pode carregar ruído de ponto flutuante (ex.:
+ * `1000.0000000000001`) mesmo quando cada parcela individual está correta
+ * — compare somas com tolerância (`toBeCloseTo` em teste, ou arredonde) ou,
+ * se precisar de exatidão, some em centavos inteiros antes de dividir por 100.
  */
 
 function pad2(n: number): string {
@@ -50,22 +57,46 @@ function shiftMonth(year: number, monthIndex0: number, monthsToAdd: number): { y
   return { year: targetYear, monthIndex0: targetMonthIndex0 }
 }
 
+/**
+ * Converte um valor em reais para centavos inteiros. `Math.round(value*100)`
+ * sozinho mis-arredonda valores cujo double fica ínfimamente abaixo de uma
+ * fronteira de meio-centavo — ex.: o literal `35.855` é armazenado como
+ * `35.854999999999996874...` (erro de representação binária ~3e-15), então
+ * `Math.round(35.855*100)` dá `3585` (35.85) em vez dos `3586` (35.86)
+ * esperados. A tolerância de `1e-9` reais é ~6 ordens de grandeza maior que
+ * esse erro de representação e ~6 ordens menor que 1 centavo: corrige a
+ * fronteira sem afetar arredondamentos genuínos (valores que não estão
+ * perto de um meio-centavo).
+ */
+function toCents(value: number): number {
+  const epsilon = value >= 0 ? 1e-9 : -1e-9
+  return Math.round(value * 100 + epsilon)
+}
+
+function fromCents(cents: number): number {
+  return cents / 100
+}
+
 function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100
+  return fromCents(toCents(value))
 }
 
 /**
  * Divide `total` em `n` parcelas iguais (2 casas decimais); a última parcela
  * absorve o resto do arredondamento, garantindo que a soma seja exatamente
- * `total` (ex.: 5000/3 → 1666.67, 1666.67, 1666.66).
+ * `total` (ex.: 5000/3 → 1666.67, 1666.67, 1666.66). Toda a divisão e
+ * distribuição do resto é feita em centavos inteiros (aritmética exata,
+ * sem ponto flutuante) — só se converte de volta para reais no final,
+ * eliminando a classe inteira de erros de arredondamento por soma de
+ * doubles intermediários.
  */
 function splitEqualInstallments(total: number, n: number): number[] {
   if (n <= 0) return []
-  const per = round2(total / n)
-  const installments = new Array(n).fill(per) as number[]
-  const sumButLast = round2(per * (n - 1))
-  installments[n - 1] = round2(total - sumButLast)
-  return installments
+  const totalCents = toCents(total)
+  const perCents = Math.round(totalCents / n)
+  const installmentsCents = new Array(n).fill(perCents) as number[]
+  installmentsCents[n - 1] = totalCents - perCents * (n - 1)
+  return installmentsCents.map(fromCents)
 }
 
 export function generateReceivables(c: ContractInput, opts: GenerateReceivablesOptions): ReceivableEntry[] {
