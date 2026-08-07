@@ -420,7 +420,17 @@ const transformOpenDeal = (db: DbOpenDealForProjection): OpenDealForProjection =
 export const financeService = {
   // ---------- Settings (1 linha por org) ----------
 
-  /** Busca as configurações financeiras da organização atual (`null` se ainda não configurada). */
+  /**
+   * Busca as configurações financeiras da organização atual.
+   *
+   * CAVEAT: `{ data: null, error: null }` é retornado tanto quando a
+   * organização ainda não tem linha em `finance_settings` (caso normal —
+   * o caller deve tratar como "usar defaults") QUANTO quando não há
+   * usuário autenticado (`getCurrentOrganizationId()` retorna `null`). Os
+   * dois casos são indistinguíveis pelo retorno; na prática só o primeiro
+   * deve ocorrer, já que a UI do módulo já está atrás de guard de rota
+   * (`requireFinanceAdmin`) antes de chamar isto.
+   */
   async getSettings(): Promise<{ data: FinanceSettings | null; error: Error | null }> {
     try {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
@@ -493,7 +503,11 @@ export const financeService = {
    * Cria um contrato e, na sequência, insere em lote os recebíveis já
    * gerados pelo core (`generateReceivables`, chamado pelo controller —
    * NUNCA aqui). Se a inserção dos recebíveis falhar, o contrato criado é
-   * removido (compensação) para não deixar contrato órfão sem parcelas.
+   * compensado com um SOFT-delete (`deleted_at`, `status='ENDED'`) — nunca
+   * `.delete()`, tabela financeira não admite hard delete. Se a própria
+   * compensação falhar, isso é logado e reportado no `error` retornado
+   * (nunca descartado em silêncio): um contrato fantasma sem recebíveis
+   * precisa de revisão manual visível, não de um `.delete()` esquecido.
    */
   async createContract(
     contract: NewFinanceContractInput,
@@ -502,6 +516,7 @@ export const financeService = {
     try {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
       const organizationId = await getCurrentOrganizationId();
+      if (!organizationId) return { data: null, error: new Error('Organização não encontrada') };
 
       const insertData = {
         contact_id: contract.contactId,
@@ -514,7 +529,7 @@ export const financeService = {
         duration_months: contract.durationMonths,
         billing_day: contract.billingDay,
         status: contract.status ?? 'ACTIVE',
-        ...(organizationId ? { organization_id: organizationId } : {}),
+        organization_id: organizationId,
       };
 
       const { data: contractRow, error: contractError } = await supabase
@@ -536,7 +551,7 @@ export const financeService = {
         description: r.description,
         amount: r.amount,
         due_date: r.dueDate,
-        ...(organizationId ? { organization_id: organizationId } : {}),
+        organization_id: organizationId,
       }));
 
       const { data: receivableRows, error: receivablesError } = await supabase
@@ -545,9 +560,32 @@ export const financeService = {
         .select();
 
       if (receivablesError) {
-        // Compensação: sem transação multi-statement no client, apagamos o
-        // contrato recém-criado para não deixar registro órfão sem parcelas.
-        await supabase.from('finance_contracts').delete().eq('id', dbContract.id);
+        // Compensação: sem transação multi-statement no client, não dá para
+        // desfazer o insert do contrato atomicamente. Em vez de HARD delete
+        // (proibido em tabela financeira — regra do módulo é soft-delete
+        // sempre), soft-deletamos o contrato órfão. `listContracts` já
+        // filtra `.is('deleted_at', null)`, então ele some da UI de
+        // qualquer forma; a diferença é que o registro fica auditável.
+        const { error: compensationError } = await supabase
+          .from('finance_contracts')
+          .update({ deleted_at: new Date().toISOString(), status: 'ENDED' })
+          .eq('id', dbContract.id);
+
+        if (compensationError) {
+          // A própria compensação falhou: o contrato órfão (sem recebíveis)
+          // continua ativo e visível. Isso NUNCA pode ser um erro silencioso.
+          console.error(
+            '[finance] falha ao compensar contrato órfão após erro nos recebíveis',
+            { contractId: dbContract.id, receivablesError, compensationError }
+          );
+          return {
+            data: null,
+            error: new Error(
+              `Falha ao criar recebíveis (${receivablesError.message}); o contrato ${dbContract.id} ficou inconsistente (sem parcelas, não foi possível marcá-lo como encerrado) e precisa de revisão manual.`
+            ),
+          };
+        }
+
         return { data: null, error: receivablesError };
       }
 
@@ -627,7 +665,7 @@ export const financeService = {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
       const { data, error } = await supabase
         .from('finance_receivables')
-        .update({ status: 'PAID', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ status: 'PAID', paid_at: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single();
@@ -645,7 +683,7 @@ export const financeService = {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
       const { data, error } = await supabase
         .from('finance_receivables')
-        .update({ status: 'PENDING', paid_at: null, updated_at: new Date().toISOString() })
+        .update({ status: 'PENDING', paid_at: null })
         .eq('id', id)
         .select()
         .single();
@@ -681,6 +719,7 @@ export const financeService = {
     try {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
       const organizationId = await getCurrentOrganizationId();
+      if (!organizationId) return { data: null, error: new Error('Organização não encontrada') };
 
       const insertData = {
         description: expense.description,
@@ -690,7 +729,7 @@ export const financeService = {
         due_day: expense.kind === 'FIXED' ? expense.dueDay ?? null : null,
         due_date: expense.kind === 'ONE_TIME' ? expense.dueDate ?? null : null,
         active: expense.active ?? true,
-        ...(organizationId ? { organization_id: organizationId } : {}),
+        organization_id: organizationId,
       };
 
       const { data, error } = await supabase
@@ -767,7 +806,7 @@ export const financeService = {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
       const { data, error } = await supabase
         .from('finance_expense_entries')
-        .update({ status: 'PAID', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ status: 'PAID', paid_at: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single();
