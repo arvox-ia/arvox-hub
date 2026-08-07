@@ -106,27 +106,55 @@ describe('buildProjection — provisão de imposto', () => {
   })
 })
 
-describe('buildProjection — despesas: lançamentos materializados vs. regras fixas', () => {
-  it('quando o mês já tem lançamento de despesa materializado, as regras fixas não são somadas de novo (evita contagem em dobro)', () => {
+describe('buildProjection — despesas: dedup por REGRA (expenseId), não por mês', () => {
+  it('quando a MESMA regra fixa (mesmo expenseId) já foi materializada naquele mês, ela não é somada de novo (evita contagem em dobro)', () => {
     const input = makeInput({
       months: ['2026-01', '2026-02'],
-      expenseEntries: [{ dueDate: '2026-01-05', amount: 200 }],
-      fixedRules: [{ amount: 200, dueDay: 5 }],
+      expenseEntries: [{ dueDate: '2026-01-05', amount: 200, expenseId: 'exp-aluguel' }],
+      fixedRules: [{ amount: 200, dueDay: 5, expenseId: 'exp-aluguel' }],
     })
     const [jan, fev] = buildProjection(input)
 
-    // Janeiro já materializado: usa só o lançamento existente (200), não soma a regra fixa de novo.
+    // Janeiro já materializado (mesmo expenseId): usa só o lançamento existente (200).
     expect(jan.expenses).toBe(200)
-    // Fevereiro sem lançamento materializado: usa a regra fixa (200).
+    // Fevereiro sem lançamento materializado para essa regra: usa a regra fixa (200).
     expect(fev.expenses).toBe(200)
   })
 
-  it('múltiplas regras fixas em mês não materializado somam todas', () => {
+  it('CRÍTICO (cenário do revisor): um lançamento ONE_TIME (expenseId X) e uma regra FIXED não materializada (expenseId Y, diferente) no mesmo mês contam OS DOIS — a existência de um lançamento qualquer no mês não pode apagar despesas fixas não relacionadas', () => {
+    const input = makeInput({
+      months: ['2026-01'],
+      expenseEntries: [{ dueDate: '2026-01-10', amount: 100, expenseId: 'exp-onetime-x' }],
+      fixedRules: [{ amount: 500, dueDay: 5, expenseId: 'exp-fixed-y' }],
+    })
+    const [point] = buildProjection(input)
+
+    // Bug antigo (dedup por mês): dropava a regra Y inteira só por existir o lançamento X → 100.
+    // Correto (dedup por regra): X sempre conta, Y ainda não materializou → soma os dois.
+    expect(point.expenses).toBe(600)
+  })
+
+  it('CRÍTICO (cenário do revisor): quando a regra FIXED Y já É materializada naquele mês, ela conta uma vez só (o lançamento existente), não duas (lançamento + regra)', () => {
+    const input = makeInput({
+      months: ['2026-01'],
+      expenseEntries: [
+        { dueDate: '2026-01-05', amount: 500, expenseId: 'exp-fixed-y' }, // regra Y já materializada
+        { dueDate: '2026-01-10', amount: 100, expenseId: 'exp-onetime-x' }, // pontual não relacionado
+      ],
+      fixedRules: [{ amount: 500, dueDay: 5, expenseId: 'exp-fixed-y' }],
+    })
+    const [point] = buildProjection(input)
+
+    // 500 (lançamento já materializado de Y) + 100 (pontual X) = 600 — NÃO 500 + 500 + 100 = 1100.
+    expect(point.expenses).toBe(600)
+  })
+
+  it('múltiplas regras fixas distintas em mês não materializado somam todas', () => {
     const input = makeInput({
       months: ['2026-01'],
       fixedRules: [
-        { amount: 200, dueDay: 5 },
-        { amount: 300, dueDay: 15 },
+        { amount: 200, dueDay: 5, expenseId: 'exp-aluguel' },
+        { amount: 300, dueDay: 15, expenseId: 'exp-prolabore' },
       ],
     })
     const [point] = buildProjection(input)
@@ -134,10 +162,10 @@ describe('buildProjection — despesas: lançamentos materializados vs. regras f
     expect(point.expenses).toBe(500)
   })
 
-  it('lançamentos pontuais (fora de qualquer regra fixa) somam normalmente ao mês', () => {
+  it('lançamentos pontuais (sem regra fixa correspondente) somam normalmente ao mês', () => {
     const input = makeInput({
       months: ['2026-01'],
-      expenseEntries: [{ dueDate: '2026-01-10', amount: 150 }],
+      expenseEntries: [{ dueDate: '2026-01-10', amount: 150, expenseId: 'exp-onetime-1' }],
       fixedRules: [],
     })
     const [point] = buildProjection(input)
@@ -167,7 +195,7 @@ describe('buildProjection — saldo acumulado', () => {
     const input = makeInput({
       months: ['2026-01', '2026-02', '2026-03'],
       receivables: [{ dueDate: '2026-01-05', amount: 100 }],
-      expenseEntries: [{ dueDate: '2026-01-10', amount: 1000 }],
+      expenseEntries: [{ dueDate: '2026-01-10', amount: 1000, expenseId: 'exp-grande' }],
       initialBalance: 0,
       taxRate: 0,
     })

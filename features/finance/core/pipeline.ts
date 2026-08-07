@@ -12,10 +12,14 @@ import type { MonthlyAmounts, OpenDeal, WeightDealsOptions } from './types'
  * Decisões de negócio fixadas aqui (ver testes em pipeline.test.ts):
  * - Sem `expectedClose`, assume-se fechamento em `today + defaultCloseDays`.
  * - O setup pondera no MÊS DE FECHAMENTO: value × probability/100.
- * - A mensalidade pondera nos `durationMonths` meses APÓS o mês de
- *   fechamento (o próprio mês de fechamento nunca recebe mensalidade) —
- *   modela o contrato como: fecha, paga setup, e só a partir do mês
- *   seguinte é que a recorrência começa a entrar (onboarding/faturamento).
+ * - A mensalidade pondera nos `durationMonths` meses seguintes, com o mês de
+ *   INÍCIO decidido pela mesma regra de `generateReceivables` (Task 3): dia
+ *   de fechamento ≤ `opts.assumedBillingDay` → mensalidade começa no
+ *   PRÓPRIO mês de fechamento; caso contrário, no mês seguinte. Isso mantém
+ *   o pipeline ponderado consistente com o contrato real que a Task 3 gera
+ *   assim que o deal fecha — sem essa regra, um deal de probabilidade 100%
+ *   mostraria uma "queda" artificial no mês de fechamento que desaparece no
+ *   instante em que vira contrato.
  * - `probability` 0 não contribui nada (nem é criada a chave do mês).
  * - Só contribuições cujo mês caia dentro de [mês de `today`, mês de
  *   `today` + horizonMonths − 1] (a janela do horizonte, `horizonMonths`
@@ -76,13 +80,18 @@ export function weightDeals(deals: OpenDeal[], opts: WeightDealsOptions): Monthl
 
     const closeDate = deal.expectedClose ?? addDaysToISODate(opts.today, opts.defaultCloseDays)
     const closeMonth = toMonthKey(closeDate)
+    const closeDay = parseISODate(closeDate).day
 
     if (closeMonth >= horizonStart && closeMonth <= horizonEnd) {
       addAmount(weighted, closeMonth, deal.value * factor)
     }
 
-    for (let i = 1; i <= deal.durationMonths; i++) {
-      const monthKey = addMonthsToKey(closeMonth, i)
+    // Mesma regra de generateReceivables: dia de fechamento <= assumedBillingDay → mensalidade
+    // começa no próprio mês de fechamento (offset 0); senão, no mês seguinte (offset 1).
+    // `durationMonths` meses somados a partir daí, sempre — o offset só desloca o início.
+    const monthlyStartOffset = closeDay <= opts.assumedBillingDay ? 0 : 1
+    for (let i = 0; i < deal.durationMonths; i++) {
+      const monthKey = addMonthsToKey(closeMonth, monthlyStartOffset + i)
       if (monthKey < horizonStart || monthKey > horizonEnd) continue
       addAmount(weighted, monthKey, deal.monthlyValue * factor)
     }

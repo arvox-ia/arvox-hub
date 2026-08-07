@@ -92,13 +92,49 @@ export interface WeightDealsOptions {
   horizonMonths: number;
   /** Dias após `today` assumidos como fechamento quando `expectedClose` é `null`. */
   defaultCloseDays: number;
+  /**
+   * Dia do mês assumido como billingDay do futuro contrato, para decidir o mês de início da
+   * mensalidade — mesma regra de `generateReceivables` (Task 3): dia de fechamento <=
+   * `assumedBillingDay` → mensalidade começa no PRÓPRIO mês de fechamento; caso contrário, no
+   * mês seguinte. Mantém `weightDeals` consistente com o contrato real gerado após o deal fechar.
+   */
+  assumedBillingDay: number;
 }
 
-/** Um recebível (ou lançamento) já existente, relevante para a projeção por `dueDate`. */
+/** Um recebível já existente, relevante para a projeção por `dueDate`. */
 export interface ProjectionDueEntry {
   /** `yyyy-MM-dd` */
   dueDate: string;
   amount: number;
+}
+
+/**
+ * Um lançamento de despesa já materializado (regra fixa gerada para o mês, ou lançamento
+ * pontual), relevante para a projeção por `dueDate`. Carrega `expenseId` — o id da despesa de
+ * catálogo (`finance_expenses.id`) que o originou — para permitir dedup por REGRA em
+ * `buildProjection` (ver `ProjectionFixedRule`); lançamentos `ONE_TIME` também têm `expenseId`
+ * (a própria linha de catálogo do lançamento pontual).
+ */
+export interface ProjectionExpenseEntry {
+  /** `yyyy-MM-dd` */
+  dueDate: string;
+  amount: number;
+  /** Id da despesa de catálogo (`finance_expenses.id`) que originou este lançamento. */
+  expenseId: string;
+}
+
+/**
+ * Regra de despesa fixa ativa, para cobrir meses ainda não materializados. Carrega `expenseId` —
+ * o id da mesma linha de catálogo (`finance_expenses.id`) — para que `buildProjection` saiba
+ * dizer "esta regra específica já foi materializada neste mês" (por `expenseId`), em vez de
+ * "existe QUALQUER lançamento neste mês" (que dropava despesas fixas não relacionadas).
+ */
+export interface ProjectionFixedRule {
+  amount: number;
+  /** Dia do mês (1-28) em que a despesa vence (não usado no agrupamento mensal da projeção). */
+  dueDay: number;
+  /** Id da despesa de catálogo (`finance_expenses.id`) dona desta regra. */
+  expenseId: string;
 }
 
 /** Entrada de `buildProjection`: dados já resolvidos para montar as duas curvas. */
@@ -108,9 +144,9 @@ export interface ProjectionInput {
   /** Recebíveis (parcelas de setup e mensalidades de contratos fechados) por vencimento. */
   receivables: ProjectionDueEntry[];
   /** Lançamentos de despesa já materializados (fixos gerados + pontuais) por vencimento. */
-  expenseEntries: ProjectionDueEntry[];
+  expenseEntries: ProjectionExpenseEntry[];
   /** Regras de despesa fixa ativas, para cobrir meses de `months` ainda não materializados. */
-  fixedRules: FixedExpenseRule[];
+  fixedRules: ProjectionFixedRule[];
   /** Pipeline ponderado (saída de `weightDeals`), mapa `yyyy-MM` → valor. */
   weighted: MonthlyAmounts;
   /** Alíquota de provisão de imposto, percentual (0-100), sobre a receita do mês. */

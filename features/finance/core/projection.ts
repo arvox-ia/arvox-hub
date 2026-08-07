@@ -1,5 +1,5 @@
 import { toMonthKey } from './pipeline'
-import type { MonthlyAmounts, ProjectionDueEntry, ProjectionInput, ProjectionPoint } from './types'
+import type { MonthlyAmounts, ProjectionDueEntry, ProjectionExpenseEntry, ProjectionInput, ProjectionPoint } from './types'
 
 /**
  * Núcleo puro da projeção de caixa em duas curvas (Fase 1B, spec §4.2/§4.3).
@@ -13,22 +13,18 @@ import type { MonthlyAmounts, ProjectionDueEntry, ProjectionInput, ProjectionPoi
  *   corrente, não este core.
  * - `probable` = `contracted` + pipeline ponderado (`input.weighted`) do
  *   mês; mês sem entrada no mapa ponderado conta como 0.
- * - Não-dupla-contagem de despesas: `expenseEntries` e `fixedRules` cobrem
- *   universos complementares por MÊS (não por regra individual). Se existe
- *   ao menos um lançamento materializado (`expenseEntries`) com vencimento
- *   naquele mês, assume-se que TODAS as regras fixas já foram
- *   materializadas para aquele mês (a geração de lançamentos fixos é feita
- *   em lote, para todas as regras ativas, no mesmo horizonte — Task 3) e as
- *   `fixedRules` são ignoradas nesse mês. Só quando o mês não tem nenhum
- *   lançamento materializado é que as `fixedRules` entram, somando
- *   `amount` de cada regra ativa (o `dueDay` de cada regra não afeta o
- *   agrupamento mensal, só a data exata do lançamento quando ele é
- *   materializado de fato).
+ * - Não-dupla-contagem de despesas é por REGRA (`expenseId`), não por mês:
+ *   `expenseEntries` sempre contribuem integralmente; uma `fixedRules[i]`
+ *   só contribui num mês se NENHUM `expenseEntries` daquele mês tiver o
+ *   mesmo `expenseId` (ou seja, aquela regra específica ainda não foi
+ *   materializada ali). Um lançamento pontual não relacionado não pode
+ *   "apagar" despesas fixas de outras regras — dedup por mês (versão
+ *   anterior) fazia exatamente isso e subestimava despesas, superestimando
+ *   o saldo piso.
  * - `taxProvision` (campo exposto) é a provisão do PISO: `taxRate`% sobre
  *   `contracted`. A curva provável usa sua PRÓPRIA provisão — `taxRate`%
- *   sobre `probable` — para compor `balanceProbable`; esse segundo valor
- *   não é exposto como campo à parte (o contrato só tem um `taxProvision`),
- *   só entra no cálculo do saldo provável.
+ *   sobre `probable` — só para compor `balanceProbable`; ver Concerns do
+ *   relatório da Task 4 para o detalhe do handoff a Task 9.
  * - `balanceFloor`/`balanceProbable` partem de `initialBalance` e acumulam,
  *   mês a mês, (receita − despesas − provisão) da curva correspondente.
  *   Saldo negativo se propaga normalmente para os meses seguintes.
@@ -47,11 +43,22 @@ function sumByMonth(entries: ProjectionDueEntry[]): MonthlyAmounts {
   return map
 }
 
+/** Mapa `yyyy-MM` → conjunto de `expenseId` já materializados naquele mês. */
+function materializedExpenseIdsByMonth(entries: ProjectionExpenseEntry[]): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>()
+  for (const entry of entries) {
+    const key = toMonthKey(entry.dueDate)
+    const ids = map.get(key) ?? new Set<string>()
+    ids.add(entry.expenseId)
+    map.set(key, ids)
+  }
+  return map
+}
+
 export function buildProjection(input: ProjectionInput): ProjectionPoint[] {
   const contractedByMonth = sumByMonth(input.receivables)
   const materializedExpensesByMonth = sumByMonth(input.expenseEntries)
-  const materializedMonths = new Set(input.expenseEntries.map((entry) => toMonthKey(entry.dueDate)))
-  const fixedRulesTotal = round2(input.fixedRules.reduce((sum, rule) => sum + rule.amount, 0))
+  const materializedIdsByMonth = materializedExpenseIdsByMonth(input.expenseEntries)
 
   let balanceFloor = input.initialBalance
   let balanceProbable = input.initialBalance
@@ -61,8 +68,14 @@ export function buildProjection(input: ProjectionInput): ProjectionPoint[] {
     const weightedForMonth = input.weighted[month] ?? 0
     const probable = round2(contracted + weightedForMonth)
 
+    // Lançamentos materializados sempre contam; regras fixas só entram se a MESMA regra
+    // (mesmo expenseId) ainda não tiver um lançamento materializado nesse mês.
     const materializedExpenses = materializedExpensesByMonth[month] ?? 0
-    const expenses = materializedMonths.has(month) ? materializedExpenses : round2(materializedExpenses + fixedRulesTotal)
+    const materializedIds = materializedIdsByMonth.get(month)
+    const unmaterializedFixed = input.fixedRules
+      .filter((rule) => !materializedIds?.has(rule.expenseId))
+      .reduce((sum, rule) => sum + rule.amount, 0)
+    const expenses = round2(materializedExpenses + unmaterializedFixed)
 
     const taxProvision = round2(contracted * (input.taxRate / 100))
     const probableProvision = round2(probable * (input.taxRate / 100))

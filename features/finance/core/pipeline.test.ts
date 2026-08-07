@@ -19,6 +19,7 @@ function makeOpts(overrides: Partial<WeightDealsOptions> = {}): WeightDealsOptio
     today: '2026-01-15',
     horizonMonths: 12,
     defaultCloseDays: 30,
+    assumedBillingDay: 5,
     ...overrides,
   }
 }
@@ -78,17 +79,58 @@ describe('weightDeals — mensalidade', () => {
     expect(out).toEqual({ '2026-02': 300, '2026-03': 300, '2026-04': 300 })
   })
 
-  it('setup e mensalidade ponderados juntos, no mesmo deal', () => {
+  it('setup e mensalidade ponderados juntos, no mesmo deal (fechamento além do assumedBillingDay)', () => {
     const deal = makeDeal({
       value: 1000,
       probability: 50,
       monthlyValue: 200,
       durationMonths: 2,
-      expectedClose: '2026-05-01',
+      expectedClose: '2026-05-20', // dia 20 > assumedBillingDay (5) → mensalidade só no mês seguinte
     })
     const out = weightDeals([deal], makeOpts())
 
     expect(out).toEqual({ '2026-05': 500, '2026-06': 100, '2026-07': 100 })
+  })
+})
+
+describe('weightDeals — onset da mensalidade alinhado ao contrato real (assumedBillingDay)', () => {
+  it('fechamento no dia 3 (<= assumedBillingDay): mensalidade começa no PRÓPRIO mês de fechamento — mesma regra de generateReceivables (Task 3)', () => {
+    const deal = makeDeal({
+      value: 0,
+      probability: 100,
+      monthlyValue: 200,
+      durationMonths: 2,
+      expectedClose: '2026-03-03',
+    })
+    const out = weightDeals([deal], makeOpts({ assumedBillingDay: 5 }))
+
+    expect(out).toEqual({ '2026-03': 200, '2026-04': 200 })
+  })
+
+  it('fechamento no dia 20 (> assumedBillingDay): mensalidade começa no mês SEGUINTE ao fechamento', () => {
+    const deal = makeDeal({
+      value: 0,
+      probability: 100,
+      monthlyValue: 200,
+      durationMonths: 2,
+      expectedClose: '2026-03-20',
+    })
+    const out = weightDeals([deal], makeOpts({ assumedBillingDay: 5 }))
+
+    expect(out).toEqual({ '2026-04': 200, '2026-05': 200 })
+  })
+
+  it('assumedBillingDay é parametrizável: dia 15 com assumedBillingDay 20 ainda cai no ramo "mesmo mês"', () => {
+    const deal = makeDeal({
+      value: 0,
+      probability: 100,
+      monthlyValue: 200,
+      durationMonths: 1,
+      expectedClose: '2026-03-15',
+    })
+    const out = weightDeals([deal], makeOpts({ assumedBillingDay: 20 }))
+
+    expect(out).toEqual({ '2026-03': 200 })
   })
 })
 
@@ -113,7 +155,7 @@ describe('weightDeals — horizonte', () => {
       probability: 100,
       monthlyValue: 100,
       durationMonths: 3,
-      expectedClose: '2026-02-01',
+      expectedClose: '2026-02-10', // dia 10 > assumedBillingDay (5): isola o teste ao horizonte, sem misturar com o onset
     })
     // horizonte = 2026-01..2026-03. Mensalidade cairia em mar/abr/mai; só mar está no horizonte.
     const out = weightDeals([deal], makeOpts({ today: '2026-01-01', horizonMonths: 3 }))
