@@ -12,11 +12,15 @@ CREATE TABLE IF NOT EXISTS public.finance_settings (
 );
 
 -- ============ 2. Contratos ============
+-- RESTRICT em contact_id é intencional: registros financeiros não podem ficar
+-- órfãos. A UI de exclusão de contato precisa checar contratos antes de
+-- deletar (guard tratado na task de Contratos). deal_id usa SET NULL porque
+-- um deal excluído não deve destruir o contrato financeiro já firmado.
 CREATE TABLE IF NOT EXISTS public.finance_contracts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-  contact_id UUID NOT NULL REFERENCES public.contacts(id),
-  deal_id UUID REFERENCES public.deals(id),
+  contact_id UUID NOT NULL REFERENCES public.contacts(id) ON DELETE RESTRICT,
+  deal_id UUID REFERENCES public.deals(id) ON DELETE SET NULL,
   description TEXT NOT NULL DEFAULT '',
   setup_value NUMERIC NOT NULL DEFAULT 0 CHECK (setup_value >= 0),
   setup_installments INT NOT NULL DEFAULT 1 CHECK (setup_installments BETWEEN 1 AND 12),
@@ -66,7 +70,8 @@ CREATE TABLE IF NOT EXISTS public.finance_expenses (
   deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK ((kind = 'FIXED' AND due_day IS NOT NULL) OR (kind = 'ONE_TIME' AND due_date IS NOT NULL))
+  CHECK ((kind = 'FIXED' AND due_day IS NOT NULL AND due_date IS NULL)
+      OR (kind = 'ONE_TIME' AND due_date IS NOT NULL AND due_day IS NULL))
 );
 CREATE INDEX idx_finance_expenses_org ON public.finance_expenses(organization_id);
 
@@ -81,10 +86,13 @@ CREATE TABLE IF NOT EXISTS public.finance_expense_entries (
   paid_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (expense_id, due_date)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_finance_expense_entries_org_due ON public.finance_expense_entries(organization_id, due_date);
+-- Partial (não coluna-level) para não bloquear recriação do mesmo mês após soft-delete.
+CREATE UNIQUE INDEX idx_finance_expense_entries_unique_active
+  ON public.finance_expense_entries(expense_id, due_date)
+  WHERE deleted_at IS NULL;
 
 -- ============ 6. Metas mensais ============
 CREATE TABLE IF NOT EXISTS public.finance_goals (
