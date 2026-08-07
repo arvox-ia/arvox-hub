@@ -120,6 +120,24 @@ describe('updateSession (Proxy/Supabase)', () => {
     expect(res).toMatchObject({ kind: 'next' })
   })
 
+  it('permite /forgot-password sem autenticação (sem redirect)', async () => {
+    const req = makeRequest('/forgot-password')
+
+    const res = await updateSession(req)
+
+    expect(mocks.nextResponseMock.redirect).not.toHaveBeenCalled()
+    expect(res).toMatchObject({ kind: 'next' })
+  })
+
+  it('permite /reset-password sem autenticação (sem redirect)', async () => {
+    const req = makeRequest('/reset-password')
+
+    const res = await updateSession(req)
+
+    expect(mocks.nextResponseMock.redirect).not.toHaveBeenCalled()
+    expect(res).toMatchObject({ kind: 'next' })
+  })
+
   it('redireciona rota protegida para /login quando não autenticado', async () => {
     const req = makeRequest('/dashboard')
 

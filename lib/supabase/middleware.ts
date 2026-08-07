@@ -88,7 +88,13 @@ export async function updateSession(request: NextRequest) {
 
     // Protected routes - redirect to login if not authenticated
     const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth')
+    // /forgot-password e /reset-password precisam ficar acessíveis sem sessão:
+    // o link de recuperação chega com o usuário deslogado (do ponto de vista
+    // do middleware) até o cliente Supabase trocar o código pela sessão.
+    const isPasswordRecoveryRoute = pathname === '/forgot-password' || pathname.startsWith('/forgot-password/')
+        || pathname === '/reset-password' || pathname.startsWith('/reset-password/')
     const isPublicRoute = pathname === '/' || pathname.startsWith('/join') || isSetupRoute || isInstallRoute
+        || isPasswordRecoveryRoute
 
     if (!user && !isAuthRoute && !isPublicRoute) {
         const url = request.nextUrl.clone()

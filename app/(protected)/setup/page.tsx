@@ -7,6 +7,7 @@ import { getErrorMessage } from '@/lib/utils/errorUtils'
 import { useAuth } from '@/context/AuthContext'
 import { Loader2, Building2, User, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { APP_NAME } from '@/lib/branding'
+import { getPasswordRequirements, isPasswordValid as checkIsPasswordValid } from '@/lib/utils/passwordValidation'
 
 /**
  * Componente React `SetupPage`.
@@ -68,13 +69,8 @@ export default function SetupPage() {
     }
   }, [router])
 
-  const passwordRequirements = {
-    minLength: password.length >= 6,
-    hasLowercase: /[a-z]/.test(password),
-    hasUppercase: /[A-Z]/.test(password),
-    hasDigit: /\d/.test(password),
-  }
-  const isPasswordValid = Object.values(passwordRequirements).every(Boolean)
+  const passwordRequirements = getPasswordRequirements(password)
+  const isPasswordValid = checkIsPasswordValid(password)
   const passwordsMatch = password === confirmPassword && confirmPassword.length > 0
 
   const handleSubmit = async (e: React.FormEvent) => {
